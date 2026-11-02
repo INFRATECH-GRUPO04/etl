@@ -16,7 +16,8 @@ if os.path.exists('.env'):
 BUCKET = os.getenv('S3_BUCKET')
 SILVER = os.getenv('S3_SILVER_PREFIX', '02-silver/').strip('/') + '/'
 GOLD = os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/'
-TIMEOUT = int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '30'))
+OFFLINE_TIMEOUT = int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900'))
+REDE_TIMEOUT = int(os.getenv('REDE_MAX_INTERVAL_SECONDS', '30'))
 LIMITE_CPU = float(os.getenv('LIMITE_CPU_PCT', '80'))
 LIMITE_RAM = float(os.getenv('LIMITE_RAM_PCT', '80'))
 LIMITE_DISCO = float(os.getenv('LIMITE_DISCO_PCT', '80'))
@@ -81,7 +82,8 @@ for empresa in empresas:
                 try:
                     enviados = int(amostra['bytes_enviados']) - int(anterior['bytes_enviados'])
                     recebidos = int(amostra['bytes_recebidos']) - int(anterior['bytes_recebidos'])
-                    if 0 < segundos <= TIMEOUT and enviados >= 0 and recebidos >= 0:
+                    # if 0 < segundos <= TIMEOUT and enviados >= 0 and recebidos >= 0:
+                    if 0 < segundos <= REDE_TIMEOUT and enviados >= 0 and recebidos >= 0:
                         up = enviados * 8 / segundos / 1_000_000
                         down = recebidos * 8 / segundos / 1_000_000
                         taxas[data] = (up, down)
@@ -95,7 +97,7 @@ for empresa in empresas:
             anterior = amostra
 
         atraso = (agora - ultima['_data']).total_seconds()
-        if atraso > TIMEOUT:
+        if atraso > OFFLINE_TIMEOUT:
             status = 'offline'
         elif ultima['_cpu'] >= LIMITE_CPU or ultima['_ram'] >= LIMITE_RAM or ultima['_disco'] >= LIMITE_DISCO:
             status = 'atencao'

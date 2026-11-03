@@ -3,6 +3,7 @@ import io
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 import boto3
 
@@ -21,11 +22,12 @@ REDE_TIMEOUT = int(os.getenv('REDE_MAX_INTERVAL_SECONDS', '30'))
 LIMITE_CPU = float(os.getenv('LIMITE_CPU_PCT', '80'))
 LIMITE_RAM = float(os.getenv('LIMITE_RAM_PCT', '80'))
 LIMITE_DISCO = float(os.getenv('LIMITE_DISCO_PCT', '80'))
+FUSO_LOCAL = ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo'))
 
 s3 = boto3.client('s3')
 servidores = defaultdict(dict)
 
-# Lê todas as coletas da Silver; a data/hora é considerada UTC.
+# Lê todas as coletas da Silver; horários sem fuso são considerados locais.
 for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix=SILVER + 'metricas/'):
     for objeto in pagina.get('Contents', []):
         if not objeto['Key'].endswith('_dados.csv'):
@@ -37,7 +39,7 @@ for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix
                 servidor = int(linha['id_servidor'])
                 data = datetime.fromisoformat(linha['data_hora'].replace('Z', '+00:00'))
                 if data.tzinfo is None:
-                    data = data.replace(tzinfo=timezone.utc)
+                    data = data.replace(tzinfo=FUSO_LOCAL)
                 data = data.astimezone(timezone.utc)
                 linha['_data'] = data
                 linha['_cpu'] = float(linha['cpu'])
@@ -66,7 +68,7 @@ for empresa in empresas:
 
         for amostra in lista:
             data = amostra['_data']
-            minuto = data.replace(second=0, microsecond=0)
+            minuto = data.astimezone(FUSO_LOCAL).replace(second=0, microsecond=0)
 
             # Guarda a última captura de cada minuto para o gráfico deste servidor.
             if inicio <= data <= agora:

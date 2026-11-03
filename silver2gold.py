@@ -53,8 +53,6 @@ empresas = sorted({empresa for empresa, servidor in servidores})
 
 for empresa in empresas:
     atuais = []
-    recursos = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
-    rede = defaultdict(lambda: defaultdict(lambda: [0, 0, 0]))
     upload_atual = download_atual = 0
 
     for (id_empresa, id_servidor), amostras in servidores.items():
@@ -63,18 +61,16 @@ for empresa in empresas:
         lista = sorted(amostras.values(), key=lambda x: x['_data'])
         ultima = lista[-1]
         taxas = {}
+        recursos = {}
         anterior = None
 
         for amostra in lista:
             data = amostra['_data']
-            minuto = data.replace(second=0, microsecond=0).strftime('%Y-%m-%d %H:%M')
+            minuto = data.replace(second=0, microsecond=0)
 
-            # Médias de CPU, RAM e disco por minuto, juntando os servidores da empresa.
+            # Guarda a última captura de cada minuto para o gráfico deste servidor.
             if inicio <= data <= agora:
-                valores = recursos[minuto]
-                for pos, campo in enumerate(('_cpu', '_ram', '_disco')):
-                    valores[pos * 2] += amostra[campo]
-                    valores[pos * 2 + 1] += 1
+                recursos[minuto] = amostra
 
             # Calcula Mbps pela diferença dos contadores entre duas coletas.
             if anterior:
@@ -82,16 +78,10 @@ for empresa in empresas:
                 try:
                     enviados = int(amostra['bytes_enviados']) - int(anterior['bytes_enviados'])
                     recebidos = int(amostra['bytes_recebidos']) - int(anterior['bytes_recebidos'])
-                    # if 0 < segundos <= TIMEOUT and enviados >= 0 and recebidos >= 0:
                     if 0 < segundos <= REDE_TIMEOUT and enviados >= 0 and recebidos >= 0:
                         up = enviados * 8 / segundos / 1_000_000
                         down = recebidos * 8 / segundos / 1_000_000
                         taxas[data] = (up, down)
-                        if inicio <= data <= agora:
-                            valores = rede[minuto][id_servidor]
-                            valores[0] += up
-                            valores[1] += down
-                            valores[2] += 1
                 except (KeyError, ValueError, TypeError):
                     pass
             anterior = amostra
@@ -109,41 +99,43 @@ for empresa in empresas:
             upload_atual += up
             download_atual += down
 
+        # Transforma as capturas em pontos prontos para o gráfico individual.
+        grafico_recursos = []
+        for minuto, amostra in sorted(recursos.items()):
+            grafico_recursos.append({
+                'horario': minuto.strftime('%Y-%m-%d %H:%M'),
+                'cpu_pct': amostra['_cpu'],
+                'ram_pct': amostra['_ram'],
+                'disco_pct': amostra['_disco'],
+            })
+
+        # Usa o último ponto do gráfico para manter os valores atuais iguais ao histórico.
+        if grafico_recursos:
+            ultimo_ponto = grafico_recursos[-1]
+            metricas_atuais = {
+                'cpu_pct': ultimo_ponto['cpu_pct'],
+                'ram_pct': ultimo_ponto['ram_pct'],
+                'disco_pct': ultimo_ponto['disco_pct'],
+            }
+        else:
+            metricas_atuais = {
+                'cpu_pct': None,
+                'ram_pct': None,
+                'disco_pct': None,
+            }
+
         atuais.append({
             'id_servidor': id_servidor,
             'nome': ultima.get('username') or f'Servidor {id_servidor}',
             'status': status,
             'ultima_coleta': ultima['data_hora'],
-            'cpu_pct': ultima['_cpu'],
-            'ram_pct': ultima['_ram'],
-            'disco_pct': ultima['_disco'],
-            'upload_mbps': round(up, 2) if up is not None else None,
-            'download_mbps': round(down, 2) if down is not None else None,
+            'metricas_atuais': metricas_atuais,
+            'graficos': {
+                'recursos_24h': grafico_recursos,
+            },
         })
 
-    # Transforma os acumuladores em pontos prontos para os gráficos da dashboard.
-    grafico_recursos = []
-    for minuto, v in sorted(recursos.items()):
-        grafico_recursos.append({
-            'horario': minuto,
-            'cpu_pct': round(v[0] / v[1], 2) if v[1] else None,
-            'ram_pct': round(v[2] / v[3], 2) if v[3] else None,
-            'disco_pct': round(v[4] / v[5], 2) if v[5] else None,
-        })
-
-    grafico_rede = []
-    for minuto, por_servidor in sorted(rede.items()):
-        upload = download = 0
-        for valores in por_servidor.values():
-            upload += valores[0] / valores[2]
-            download += valores[1] / valores[2]
-        grafico_rede.append({
-            'horario': minuto,
-            'upload_mbps': round(upload, 2),
-            'download_mbps': round(download, 2),
-        })
-
-    online = sum(1 for s in atuais if s['status'] != 'offline')
+    online = sum(1 for s in atuais if s['status'] == 'online')
     atencao = sum(1 for s in atuais if s['status'] == 'atencao')
     offline = sum(1 for s in atuais if s['status'] == 'offline')
     documento = {
@@ -154,16 +146,11 @@ for empresa in empresas:
             'servidores_online': online,
             'servidores_atencao': atencao,
             'servidores_offline': offline,
-            'servidores_para_investigar': atencao + offline,
             'upload_mbps': round(upload_atual, 2),
             'download_mbps': round(download_atual, 2),
-            'trafego_total_mbps': round(upload_atual + download_atual, 2),
+            'trafego_mbps': round(upload_atual + download_atual, 2),
         },
         'servidores': sorted(atuais, key=lambda x: x['id_servidor']),
-        'graficos': {
-            'recursos_24h': grafico_recursos,
-            'rede_24h': grafico_rede,
-        },
     }
 
     chave = f'{GOLD}empresa-{empresa}/dashboard.json'

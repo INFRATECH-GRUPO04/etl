@@ -1,0 +1,44 @@
+{
+    "idEmpresa": 2,
+    "geradoEm": "2026-11-20T18:23:552",
+    "kpis": {
+        "componenteMaisAlertas": {
+            "componente": "RAM",
+            "atencao": 6,
+            "critico": 7
+        },
+        "saudeServidor": 80,
+        "maiorVariacao":{
+            "componente": "CPU",
+            "porcentagem": 89,
+            "crescimento": 21
+        },
+        "alertasRegistrados":{
+            "quantidade": 20
+        }
+    },
+    "parte1": {
+        "maiorVariacaoComponentes":{
+            "cpu": {
+                "estadoAtual": 89,
+                "hora": "12:20"
+            },
+            "ram": {
+                "estadoAtual": 89,
+                "hora": "12:20"
+            },
+            "disco": {
+                "estadoAtual": 89,
+                "hora": "12:20"
+            },
+            "rede": {
+                "estadoAtual": 89,
+                "hora": "12:20"
+            }
+        },
+        "usoRecurso": {
+            
+        }
+
+    }  
+}

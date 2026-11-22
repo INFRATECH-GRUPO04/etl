@@ -164,4 +164,38 @@ for empresa in empresas:
     )
     print(f'Gerado: {chave} ({len(atuais)} servidores)')
 
+
+# json sarah
+documento_sarah = {
+    'id_empresa': empresa,
+    'gerado_em': agora.isoformat(),
+    'kpis': {
+        'total_servidores': len(atuais_sarah),
+        'servidores_online': online,
+        'servidores_atencao': atencao,
+        'servidores_offline': offline,
+        'media_cpu_pct': media([s['metricas_atuais']['cpu_pct'] for s in ativos]),
+        'media_ram_pct': media([s['metricas_atuais']['ram_pct'] for s in ativos]),
+        'media_disco_pct': media([s['metricas_atuais']['disco_pct'] for s in ativos]),
+        'media_temperatura_cpu': media([s['metricas_atuais']['temperatura_cpu'] for s in ativos]),
+        'upload_mbps': round(upload_atual, 2),
+        'download_mbps': round(download_atual, 2),
+        'trafego_mbps': round(upload_atual + download_atual, 2),
+        'total_alertas': sum(len(s['alertas']) for s in atuais_sarah),
+    },
+    'servidores': sorted(atuais_sarah, key=lambda x: x['id_servidor']),
+}
+
+chave_sarah = f'{GOLD}empresa-{empresa}-{servidor}/dashboard_sarah.json'
+s3.put_object(
+    Bucket=BUCKET,
+    Key=chave_sarah,
+    Body=json.dumps(documento_sarah, ensure_ascii=False, indent=2),
+    ContentType='application/json'
+)
+print(f'Gerado: {chave_sarah} ({len(atuais_sarah)} servidores)')
+
+print('Silver -> Gold concluído.')
+
+
 print('Silver -> Gold concluído.')

@@ -168,6 +168,8 @@ for empresa in empresas:
 # json sarah
 documento_sarah = {
     'id_empresa': empresa,
+    'id_servidor': servidor,
+    'nome_servidor': servidor,
     'gerado_em': agora.isoformat(),
     'kpis': {
         'total_servidores': len(atuais_sarah),
@@ -194,8 +196,5 @@ s3.put_object(
     ContentType='application/json'
 )
 print(f'Gerado: {chave_sarah} ({len(atuais_sarah)} servidores)')
-
-print('Silver -> Gold concluído.')
-
 
 print('Silver -> Gold concluído.')

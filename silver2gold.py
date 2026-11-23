@@ -17,15 +17,44 @@ if os.path.exists('.env'):
 BUCKET = os.getenv('S3_BUCKET')
 SILVER = os.getenv('S3_SILVER_PREFIX', '02-silver/').strip('/') + '/'
 GOLD = os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/'
+GOLD_BUCKET = os.getenv('S3_GOLD_BUCKET') or BUCKET
 OFFLINE_TIMEOUT = int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900'))
-REDE_TIMEOUT = int(os.getenv('REDE_MAX_INTERVAL_SECONDS', '30'))
-LIMITE_CPU = float(os.getenv('LIMITE_CPU_PCT', '80'))
-LIMITE_RAM = float(os.getenv('LIMITE_RAM_PCT', '80'))
-LIMITE_DISCO = float(os.getenv('LIMITE_DISCO_PCT', '80'))
+FREQUENCIA = int(os.getenv('FREQUENCIA_ESPERADA_SEGUNDOS', '60'))
+JANELAS = {'24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400}
 FUSO_LOCAL = ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo'))
+DIAS_SEMANA = ('Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom')
 
 s3 = boto3.client('s3')
 servidores = defaultdict(dict)
+
+
+def disponibilidade(lista, inicio, fim):
+    if not lista:
+        return None
+    recebidas = sum(1 for a in lista if inicio <= a['_data'] < fim)
+    esperadas = (fim - inicio).total_seconds() / FREQUENCIA
+    return round(min(100, recebidas / esperadas * 100), 1) if esperadas > 0 else None
+
+
+def serie_frota(listas, segundos, passos, rotulo):
+    def serie(fim):
+        inicio = fim - timedelta(seconds=segundos * passos)
+        rotulos, valores = [], []
+        for i in range(passos):
+            inicio_bucket = inicio + timedelta(seconds=segundos * i)
+            fim_bucket = inicio_bucket + timedelta(seconds=segundos)
+            pontos = [disponibilidade(lista, inicio_bucket, fim_bucket) for lista in listas]
+            pontos = [v for v in pontos if v is not None]
+            rotulos.append(rotulo(inicio_bucket))
+            valores.append(round(sum(pontos) / len(pontos), 1) if pontos else None)
+        validos = [v for v in valores if v is not None]
+        media = round(sum(validos) / len(validos), 1) if validos else None
+        return rotulos, valores, media
+
+    rotulos, valores, media = serie(agora)
+    _, _, anterior = serie(agora - timedelta(seconds=segundos * passos))
+    return {'rotulos': rotulos, 'valores': valores, 'media': media, 'anterior': anterior}
+
 
 # Lê todas as coletas da Silver; horários sem fuso são considerados locais.
 for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix=SILVER + 'metricas/'):
@@ -50,118 +79,81 @@ for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix
                 continue
 
 agora = datetime.now(timezone.utc)
-inicio = agora - timedelta(hours=24)
 empresas = sorted({empresa for empresa, servidor in servidores})
 
+rotulos = {
+    '24h': lambda ini: ini.astimezone(FUSO_LOCAL).strftime('%Hh'),
+    '7d': lambda ini: DIAS_SEMANA[ini.astimezone(FUSO_LOCAL).weekday()],
+    '30d': lambda ini: ini.astimezone(FUSO_LOCAL).strftime('%d/%m'),
+}
+
 for empresa in empresas:
-    atuais = []
-    upload_atual = download_atual = 0
+    servidores_empresa = []
+    listas = []
 
     for (id_empresa, id_servidor), amostras in servidores.items():
         if id_empresa != empresa:
             continue
         lista = sorted(amostras.values(), key=lambda x: x['_data'])
+        listas.append(lista)
         ultima = lista[-1]
-        taxas = {}
-        recursos = {}
-        anterior = None
-
-        for amostra in lista:
-            data = amostra['_data']
-            minuto = data.astimezone(FUSO_LOCAL).replace(second=0, microsecond=0)
-
-            # Guarda a última captura de cada minuto para o gráfico deste servidor.
-            if inicio <= data <= agora:
-                recursos[minuto] = amostra
-
-            # Calcula Mbps pela diferença dos contadores entre duas coletas.
-            if anterior:
-                segundos = (data - anterior['_data']).total_seconds()
-                try:
-                    enviados = int(amostra['bytes_enviados']) - int(anterior['bytes_enviados'])
-                    recebidos = int(amostra['bytes_recebidos']) - int(anterior['bytes_recebidos'])
-                    if 0 < segundos <= REDE_TIMEOUT and enviados >= 0 and recebidos >= 0:
-                        up = enviados * 8 / segundos / 1_000_000
-                        down = recebidos * 8 / segundos / 1_000_000
-                        taxas[data] = (up, down)
-                except (KeyError, ValueError, TypeError):
-                    pass
-            anterior = amostra
-
         atraso = (agora - ultima['_data']).total_seconds()
-        if atraso > OFFLINE_TIMEOUT:
-            status = 'offline'
-        elif ultima['_cpu'] >= LIMITE_CPU or ultima['_ram'] >= LIMITE_RAM or ultima['_disco'] >= LIMITE_DISCO:
-            status = 'atencao'
-        else:
-            status = 'online'
+        conexao = 'offline' if atraso > OFFLINE_TIMEOUT else 'online'
 
-        up, down = taxas.get(ultima['_data'], (None, None))
-        if status != 'offline' and up is not None:
-            upload_atual += up
-            download_atual += down
-
-        # Transforma as capturas em pontos prontos para o gráfico individual.
-        grafico_recursos = []
-        for minuto, amostra in sorted(recursos.items()):
-            grafico_recursos.append({
-                'horario': minuto.strftime('%Y-%m-%d %H:%M'),
-                'cpu_pct': amostra['_cpu'],
-                'ram_pct': amostra['_ram'],
-                'disco_pct': amostra['_disco'],
-            })
-
-        # Usa o último ponto do gráfico para manter os valores atuais iguais ao histórico.
-        if grafico_recursos:
-            ultimo_ponto = grafico_recursos[-1]
-            metricas_atuais = {
-                'cpu_pct': ultimo_ponto['cpu_pct'],
-                'ram_pct': ultimo_ponto['ram_pct'],
-                'disco_pct': ultimo_ponto['disco_pct'],
-            }
-        else:
-            metricas_atuais = {
-                'cpu_pct': None,
-                'ram_pct': None,
-                'disco_pct': None,
-            }
-
-        atuais.append({
+        servidores_empresa.append({
             'id_servidor': id_servidor,
-            'nome': ultima.get('username') or f'Servidor {id_servidor}',
-            'status': status,
-            'ultima_coleta': ultima['data_hora'],
-            'metricas_atuais': metricas_atuais,
-            'graficos': {
-                'recursos_24h': grafico_recursos,
+            'nome': None,
+            'cidade': None,
+            'conexao': conexao,
+            'ultima_leitura': ultima['_data'].isoformat(),
+            'tempo_min': None,
+            'situacao': None,
+            'inc7d': None,
+            'atual': {
+                'cpu': ultima['_cpu'],
+                'ram': ultima['_ram'],
+                'disco': ultima['_disco'],
+            },
+            'disponibilidade_pct': {
+                '24h': disponibilidade(lista, agora - timedelta(seconds=JANELAS['24h']), agora),
             },
         })
 
-    online = sum(1 for s in atuais if s['status'] == 'online')
-    atencao = sum(1 for s in atuais if s['status'] == 'atencao')
-    offline = sum(1 for s in atuais if s['status'] == 'offline')
+    servidores_empresa.sort(key=lambda s: s['id_servidor'])
     documento = {
+        'versao': 1,
         'id_empresa': empresa,
         'gerado_em': agora.isoformat(),
-        'kpis': {
-            'total_servidores': len(atuais),
-            'servidores_online': online,
-            'servidores_atencao': atencao,
-            'servidores_offline': offline,
-            'upload_mbps': round(upload_atual, 2),
-            'download_mbps': round(download_atual, 2),
-            'trafego_mbps': round(upload_atual + download_atual, 2),
+        'ambiente': None,
+        'servidores': servidores_empresa,
+        'disponibilidade_frota': {
+            '24h': serie_frota(listas, JANELAS['24h'] / 24, 24, rotulos['24h']),
+            '7d': serie_frota(listas, 86400, 7, rotulos['7d']),
+            '30d': serie_frota(listas, 86400, 30, rotulos['30d']),
         },
-        'servidores': sorted(atuais, key=lambda x: x['id_servidor']),
+        'incidentes': {
+            'abertos': [],
+            'por_dia': {
+                '7d': {'rotulos': [], 'valores': [], 'anterior': None},
+                '30d': {'rotulos': [], 'valores': [], 'anterior': None},
+            },
+            'mttr': {'minutos': None, 'periodo': '(últimos 30d)'},
+        },
+        'relatorio_ia': {
+            'gerado_em': None,
+            'resumo': '',
+            'pontos': [],
+            'recomendacoes': [],
+        },
     }
 
-    chave = f'{GOLD}empresa-{empresa}/dashboard.json'
+    chave = f'{GOLD}empresa-{empresa}/dash-geral.json'
     s3.put_object(
-        Bucket=BUCKET,
+        Bucket=GOLD_BUCKET,
         Key=chave,
         Body=json.dumps(documento, ensure_ascii=False, indent=2),
         ContentType='application/json'
     )
-    print(f'Gerado: {chave} ({len(atuais)} servidores)')
+    print(f'Gerado: {chave} ({len(servidores_empresa)} servidores)')
 
 print('Silver -> Gold concluído.')

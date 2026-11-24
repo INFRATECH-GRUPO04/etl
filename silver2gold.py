@@ -2,7 +2,7 @@ import csv
 import io
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import boto3
@@ -17,11 +17,6 @@ if os.path.exists('.env'):
 BUCKET = os.getenv('S3_BUCKET')
 SILVER = os.getenv('S3_SILVER_PREFIX', '02-silver/').strip('/') + '/'
 GOLD = os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/'
-OFFLINE_TIMEOUT = int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900'))
-REDE_TIMEOUT = int(os.getenv('REDE_MAX_INTERVAL_SECONDS', '30'))
-LIMITE_CPU = float(os.getenv('LIMITE_CPU_PCT', '80'))
-LIMITE_RAM = float(os.getenv('LIMITE_RAM_PCT', '80'))
-LIMITE_DISCO = float(os.getenv('LIMITE_DISCO_PCT', '80'))
 FUSO_LOCAL = ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo'))
 
 s3 = boto3.client('s3')
@@ -50,151 +45,84 @@ for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix
                 continue
 
 agora = datetime.now(timezone.utc)
-inicio = agora - timedelta(hours=24)
-empresas = sorted({empresa for empresa, servidor in servidores})
 
-for empresa in empresas:
-    atuais = []
-    upload_atual = download_atual = 0
+# ---------------- JSON SARAH: últimas capturas de cada servidor ----------------
+CAPTURAS_SARAH = int(os.getenv('CAPTURAS_SARAH', '10'))
+BANDA_MBPS = float(os.getenv('LARGURA_BANDA_MBPS', '1000'))         # capacidade da rede, base do cálculo de %
+REDE_SARAH_TIMEOUT = int(os.getenv('REDE_SARAH_MAX_INTERVAL_SECONDS', '180'))  # intervalo máximo entre duas leituras
 
-    for (id_empresa, id_servidor), amostras in servidores.items():
-        if id_empresa != empresa:
-            continue
-        lista = sorted(amostras.values(), key=lambda x: x['_data'])
-        ultima = lista[-1]
-        taxas = {}
-        recursos = {}
-        anterior = None
 
-        for amostra in lista:
-            data = amostra['_data']
-            minuto = data.astimezone(FUSO_LOCAL).replace(second=0, microsecond=0)
+def rede_percentual(atual, anterior):
+    """Usa a diferença dos contadores de bytes entre duas capturas para calcular % de uso da banda."""
+    try:
+        segundos = (atual['_data'] - anterior['_data']).total_seconds()
+        enviados = int(atual['bytes_enviados']) - int(anterior['bytes_enviados'])
+        recebidos = int(atual['bytes_recebidos']) - int(anterior['bytes_recebidos'])
+    except (KeyError, ValueError, TypeError):
+        return None
+    # contador zerado (reinício da máquina) ou intervalo grande demais: não dá para confiar
+    if not (0 < segundos <= REDE_SARAH_TIMEOUT) or enviados < 0 or recebidos < 0:
+        return None
+    mbps = (enviados + recebidos) * 8 / segundos / 1_000_000
+    return round(min(100.0, mbps / BANDA_MBPS * 100), 1)
 
-            # Guarda a última captura de cada minuto para o gráfico deste servidor.
-            if inicio <= data <= agora:
-                recursos[minuto] = amostra
 
-            # Calcula Mbps pela diferença dos contadores entre duas coletas.
-            if anterior:
-                segundos = (data - anterior['_data']).total_seconds()
-                try:
-                    enviados = int(amostra['bytes_enviados']) - int(anterior['bytes_enviados'])
-                    recebidos = int(amostra['bytes_recebidos']) - int(anterior['bytes_recebidos'])
-                    if 0 < segundos <= REDE_TIMEOUT and enviados >= 0 and recebidos >= 0:
-                        up = enviados * 8 / segundos / 1_000_000
-                        down = recebidos * 8 / segundos / 1_000_000
-                        taxas[data] = (up, down)
-                except (KeyError, ValueError, TypeError):
-                    pass
-            anterior = amostra
+CAMPOS = ('cpu', 'ram', 'disco', 'rede')
 
-        atraso = (agora - ultima['_data']).total_seconds()
-        if atraso > OFFLINE_TIMEOUT:
-            status = 'offline'
-        elif ultima['_cpu'] >= LIMITE_CPU or ultima['_ram'] >= LIMITE_RAM or ultima['_disco'] >= LIMITE_DISCO:
-            status = 'atencao'
-        else:
-            status = 'online'
+for (id_empresa, id_servidor), amostras in servidores.items():
+    lista = sorted(amostras.values(), key=lambda x: x['_data'])
 
-        up, down = taxas.get(ultima['_data'], (None, None))
-        if status != 'offline' and up is not None:
-            upload_atual += up
-            download_atual += down
+    # pega capturas extras para calcular a rede e a variação da primeira captura do lote
+    recorte = lista[-(CAPTURAS_SARAH + 2):]
 
-        # Transforma as capturas em pontos prontos para o gráfico individual.
-        grafico_recursos = []
-        for minuto, amostra in sorted(recursos.items()):
-            grafico_recursos.append({
-                'horario': minuto.strftime('%Y-%m-%d %H:%M'),
-                'cpu_pct': amostra['_cpu'],
-                'ram_pct': amostra['_ram'],
-                'disco_pct': amostra['_disco'],
-            })
-
-        # Usa o último ponto do gráfico para manter os valores atuais iguais ao histórico.
-        if grafico_recursos:
-            ultimo_ponto = grafico_recursos[-1]
-            metricas_atuais = {
-                'cpu_pct': ultimo_ponto['cpu_pct'],
-                'ram_pct': ultimo_ponto['ram_pct'],
-                'disco_pct': ultimo_ponto['disco_pct'],
-            }
-        else:
-            metricas_atuais = {
-                'cpu_pct': None,
-                'ram_pct': None,
-                'disco_pct': None,
-            }
-
-        atuais.append({
-            'id_servidor': id_servidor,
-            'nome': ultima.get('username') or f'Servidor {id_servidor}',
-            'status': status,
-            'ultima_coleta': ultima['data_hora'],
-            'metricas_atuais': metricas_atuais,
-            'graficos': {
-                'recursos_24h': grafico_recursos,
-            },
+    pontos = []
+    for i, amostra in enumerate(recorte):
+        anterior = recorte[i - 1] if i > 0 else None
+        pontos.append({
+            'dataHora': amostra['_data'].astimezone(FUSO_LOCAL).strftime('%Y-%m-%d %H:%M:%S'),
+            'cpu': amostra['_cpu'],
+            'ram': amostra['_ram'],
+            'disco': amostra['_disco'],
+            'rede': rede_percentual(amostra, anterior) if anterior else None,
         })
 
-    online = sum(1 for s in atuais if s['status'] == 'online')
-    atencao = sum(1 for s in atuais if s['status'] == 'atencao')
-    offline = sum(1 for s in atuais if s['status'] == 'offline')
-    documento = {
-        'id_empresa': empresa,
+    capturas = pontos[-CAPTURAS_SARAH:] if CAPTURAS_SARAH else pontos
+
+    # variação em relação à captura anterior, inclusive a última captura do lote anterior
+    for i, captura in enumerate(capturas):
+        indice_anterior = len(pontos) - len(capturas) + i - 1
+        anterior = pontos[indice_anterior] if indice_anterior >= 0 else None
+        captura['variacao'] = None
+        if anterior is not None:
+            captura['variacao'] = {
+                c: (round(captura[c] - anterior[c], 1)
+                    if captura[c] is not None and anterior[c] is not None else None)
+                for c in CAMPOS
+            }
+
+    medias = {}
+    for campo in CAMPOS:
+        valores = [c[campo] for c in capturas if c[campo] is not None]
+        medias[campo] = round(sum(valores) / len(valores), 1) if valores else None
+
+    documento_sarah = {
+        'id_empresa': id_empresa,
+        'id_servidor': id_servidor,
+        'nome_servidor': lista[-1].get('username') or f'Servidor {id_servidor}',
+        'lote': capturas[-1]['dataHora'],
         'gerado_em': agora.isoformat(),
-        'kpis': {
-            'total_servidores': len(atuais),
-            'servidores_online': online,
-            'servidores_atencao': atencao,
-            'servidores_offline': offline,
-            'upload_mbps': round(upload_atual, 2),
-            'download_mbps': round(download_atual, 2),
-            'trafego_mbps': round(upload_atual + download_atual, 2),
-        },
-        'servidores': sorted(atuais, key=lambda x: x['id_servidor']),
+        'medias': medias,
+        'capturas': capturas,
     }
 
-    chave = f'{GOLD}empresa-{empresa}/dashboard.json'
+    data_arquivo = capturas[0]['dataHora'][:10]
+    chave_sarah = f'{GOLD}empresa_id={id_empresa}/servidor_id={id_servidor}/data={data_arquivo}/dashboard_sarah.json'
     s3.put_object(
         Bucket=BUCKET,
-        Key=chave,
-        Body=json.dumps(documento, ensure_ascii=False, indent=2),
+        Key=chave_sarah,
+        Body=json.dumps(documento_sarah, ensure_ascii=False, indent=2),
         ContentType='application/json'
     )
-    print(f'Gerado: {chave} ({len(atuais)} servidores)')
-
-
-# json sarah
-documento_sarah = {
-    'id_empresa': empresa,
-    'id_servidor': servidor,
-    'nome_servidor': servidor,
-    'gerado_em': agora.isoformat(),
-    'kpis': {
-        'total_servidores': len(atuais_sarah),
-        'servidores_online': online,
-        'servidores_atencao': atencao,
-        'servidores_offline': offline,
-        'media_cpu_pct': media([s['metricas_atuais']['cpu_pct'] for s in ativos]),
-        'media_ram_pct': media([s['metricas_atuais']['ram_pct'] for s in ativos]),
-        'media_disco_pct': media([s['metricas_atuais']['disco_pct'] for s in ativos]),
-        'media_temperatura_cpu': media([s['metricas_atuais']['temperatura_cpu'] for s in ativos]),
-        'upload_mbps': round(upload_atual, 2),
-        'download_mbps': round(download_atual, 2),
-        'trafego_mbps': round(upload_atual + download_atual, 2),
-        'total_alertas': sum(len(s['alertas']) for s in atuais_sarah),
-    },
-    'servidores': sorted(atuais_sarah, key=lambda x: x['id_servidor']),
-}
-
-chave_sarah = f'{GOLD}empresa-{empresa}-{servidor}/dashboard_sarah.json'
-s3.put_object(
-    Bucket=BUCKET,
-    Key=chave_sarah,
-    Body=json.dumps(documento_sarah, ensure_ascii=False, indent=2),
-    ContentType='application/json'
-)
-print(f'Gerado: {chave_sarah} ({len(atuais_sarah)} servidores)')
+    print(f'Gerado: {chave_sarah} ({len(capturas)} capturas)')
 
 print('Silver -> Gold concluído.')

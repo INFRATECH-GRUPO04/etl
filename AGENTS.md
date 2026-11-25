@@ -1,6 +1,6 @@
 # InfraTech — Contexto do Projeto
 
-Mesmo arquivo nos 3 repositórios (site full stack, ETL, script de captura). Leia as seções 1–7 (negócio) e só a nota do repositório em que você está (seção 8). Quando houver conflito, **o código atual vale mais que PDFs antigos**. Se algo não estiver aqui ou estiver incerto, pergunte antes de assumir.
+Mesmo arquivo nos 4 repositórios (site, logs/Java, ETL, script de captura). Leia as seções 1–7 (negócio), a nota do seu repositório na seção 8 e o acordo de fluxo na seção 9. Quando houver conflito, **o código atual vale mais que PDFs antigos e que este documento**. Se algo não estiver aqui ou estiver incerto, pergunte antes de assumir.
 
 ## 1. Contexto
 
@@ -74,16 +74,37 @@ Reduzir o tempo para detectar e diagnosticar falhas, com dashboards por persona,
 
 ## 8. Arquitetura e notas por repositório
 
-**Fluxo:** servidor do cliente (script Python local) → CSV → `POST /agente/enviar` no back-end → S3 (Data Lake) `01-bronze/` → Lambda bronze→silver → `02-silver/` → Lambda silver→gold → `03-gold/`. Back-end Node/Express expõe rotas com dados do gold para as dashboards (HTML/CSS/JS + Chart.js). Uma aplicação Java lê os JSON do data lake e compara com os limites por componente no MySQL, notificando via Slack e Jira. Node, Java e MySQL rodam em containers Docker numa **única EC2**.
+**Fluxo:** servidor do cliente (script Python local) → CSV → `POST /agente/enviar` no back-end → S3 (Data Lake) `01-bronze/` → Lambda bronze→silver → `02-silver/` → (a) Lambda silver→gold → `03-gold/` para os dashboards do site; (b) aplicação Java lê os **CSVs da `02-silver/` diretamente**, cruza com os limites no MySQL e notifica Slack/Jira. **Não existe `latest.json` em nenhum prefixo.** Back-end Node/Express expõe rotas com dados do gold para as dashboards (HTML/CSS/JS + Chart.js). Node, Java e MySQL rodam em containers Docker numa **única EC2**.
 
-**Captura:** coleta a cada 1 min; ao acumular 10 linhas (10 min) envia o lote. Autentica com `x-chave-servidor`. Cabeçalhos do CSV (`dados`, `processos`) são definidos em `CABECALHOS` no `agenteController.js` e devem ser idênticos nos dois lados.
+**Captura:** acordo: coleta a cada 1 min; ao acumular 10 capturas (10 min) envia o lote. O código pode estar com outros valores (`5s`/`5` capturas) — confirme em `captura_servidor.py` antes de assumir. Autentica com `x-chave-servidor`. Cabeçalhos do CSV (`dados`, `processos`) são definidos em `CABECALHOS` no `agenteController.js` e devem ser idênticos nos dois lados; o Java também consome esse cabeçalho (3º consumidor).
 
-**Site (este repo, se for o do site):**
+**Site:**
 - `app.js` fixa `ambiente_processo = 'desenvolvimento'` e carrega `.env.dev` (a partir de `.env.example`); sem isso a porta e o banco não carregam. `npm install`, `npm start` ou `npm run dev`. Não há testes/lint/CI: valide manualmente.
 - Fluxo `routes → controllers → models → database/config.js`; sempre use consultas parametrizadas. SQL em `snake_case`, JS em `camelCase` via alias.
 - Front é plano (`public/html|css|js`) mas as URLs são aninhadas; o middleware de `app.js` resolve pelo nome do arquivo. Não mova nem duplique nomes.
 - `public/js/permissoes.js` é a única fonte das regras de acesso (usada também no back-end).
 - Sessão: cookie HMAC `infratech_session` (12 h). Sem `AUTH_TOKEN_SECRET`, restart desloga todos.
 - Schema: fonte da verdade é `src/database/infratech-atualizado.sql`; não altere schema sem alinhar. Atenção: o código usa a tabela `limite_alerta_global`, que só existe em `SCRIPT-INFRATECH.sql`.
+- O back-end lê `03-gold/empresa-{id}/dash-geral.json`; a seção 9 descreve quem grava esse arquivo.
 
-**ETL:** duas Lambdas Python (bronze→silver, silver→gold), prefixos `01-bronze`, `02-silver`, `03-gold`.
+**ETL:** duas Lambdas Python (bronze→silver, silver→gold), prefixos `01-bronze`, `02-silver`, `03-gold`. A bronze→silver fica como está: sem `latest.json`, sem watermark e sem mudança de formato. A silver→gold roda a cada 30 min, usa janela de 40 dias e grava `03-gold/empresa-{id}/dash-geral.json` (nome que o site lê; não `dashboard.json`).
+
+**Logs/Java:** `mvn -q package` gera o jar executável; `Dockerfile` + `.env.example` para rodar local/EC2. O Java lê `02-silver/metricas/` com `S3_SILVER_PREFIX` (não usa mais `S3_ALERTA_PREFIX`) e precisa de `s3:ListBucket` na silver além de `GetObject`. Config fora do repo em `~/.config/infratech/alertas.env`. Não há testes/lint/CI: validar manualmente.
+
+**Script de captura:** acordo: `INTERVALO = 60`, `CAPTURAS_POR_LOTE = 10` (se o arquivo ainda estiver em `5`/`5`, ajustar só quando pedido). `bytes_enviados`/`bytes_recebidos` são contadores cumulativos, não Mbps. O `lote` no nome do arquivo é `YYYYMMDDTHHMMSSZ`, mas é gerado em `America/Sao_Paulo`: o `Z` é enganoso.
+
+## 9. Acordo de fluxo, cadências e alertas (25/11/2026)
+
+Vale para os 4 repositórios. Se o código divergir, **o código atual vence**; alinhe antes de mudar.
+
+**Coleta (script_python):** 1 captura por minuto, lote de 10 capturas enviado a cada 10 min via `POST /agente/enviar`. Cabeçalho fixo e IDs de empresa/servidor no nome do arquivo e dentro do CSV. `bytes_enviados`/`bytes_recebidos` são cumulativos — a conversão para Mbps é feita depois, pelo Java.
+
+**Bronze → silver (ETL):** inalterado. Chaves `02-silver/metricas/empresa_id={id}/servidor_id={id}/data=AAAA-MM-DD/<lote>_empresa-{id}_servidor-{id}_dados.csv`. Um lote que cruza meia-noite gera dois arquivos com o mesmo `lote`. **Não gerar `latest.json` em lugar nenhum.**
+
+**Silver → gold (ETL):** execução a cada 30 min; janela máxima de 40 dias; filtrar a chave `data=` antes de baixar/parsear para não reprocessar tudo; gravar `03-gold/empresa-{id}/dash-geral.json`.
+
+**Java de alertas (logs):** lê os CSVs da silver diretamente. Usa `S3_SILVER_PREFIX` (default `02-silver/metricas/`); listagem paginada; filtra `_dados.csv` das partições de hoje/ontem; monta as amostras com parser manual (`split(",", -1)` + índice do cabeçalho, sem dependência nova). Watermark **por `(empresa, servidor)`**, usando o `lote` do nome do arquivo (interpretado como Brasília, não UTC); sem lote novo, não faz GET. Agrupa os dois arquivos de um mesmo lote quando ele cruza meia-noite. Para a rede, lê também o lote anterior do servidor e calcula `Mbps = (bytes[t] - bytes[t-1]) / Δt * 8 / 1e6`, com `Δt` real dos `data_hora` e delta negativo tratado como 0.
+
+**Regra de alerta:** janela de **10 min** contada a partir do maior `data_hora` lido (equivalente ao antigo `gerado_em`); a **média** das amostras define `CRÍTICO`/`ATENÇÃO`; gera chamado quando **7 de 10** amostras estão acima do limite escolhido, **sem exigir que sejam consecutivas**; se não chegar dado novo por mais de **15 min**, loga aviso e não cria chamado — essa checagem vem **antes** do `return` do watermark. Configurável por env: `ALERTA_JANELA_MINUTOS=10`, `ALERTA_MIN_AMOSTRAS=7`, `ALERTA_MAX_IDADE_MINUTOS=15`. O loop do Java continua usando `ALERTA_INTERVALO_SEGUNDOS`. A descrição do Jira inclui a leitura mais recente e a janela avaliada. Slack/Jira são ferramentas internas da InfraTech, um chamado por ocorrência.
+
+**Site:** segue lendo `03-gold/empresa-{id}/dash-geral.json`; nada muda no front por causa deste acordo.

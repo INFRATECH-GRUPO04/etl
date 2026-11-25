@@ -25,9 +25,6 @@ def carregar_configuracao():
         'gold': os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/',
         'offline_timeout': int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900')),
         'rede_timeout': int(os.getenv('REDE_MAX_INTERVAL_SECONDS', '90')),
-        'limite_cpu': float(os.getenv('LIMITE_CPU_PCT', '80')),
-        'limite_ram': float(os.getenv('LIMITE_RAM_PCT', '80')),
-        'limite_disco': float(os.getenv('LIMITE_DISCO_PCT', '80')),
         'fuso': ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo')),
     }
 
@@ -113,9 +110,7 @@ def run(s3=None, *, agora=None):
     empresas = sorted({empresa for empresa, _ in servidores})
 
     for empresa in empresas:
-        atuais = []
         noc_servidores = []
-        upload_atual = download_atual = 0
 
         for (id_empresa, id_servidor), amostras in servidores.items():
             if id_empresa != empresa:
@@ -153,33 +148,12 @@ def run(s3=None, *, agora=None):
                 anterior = amostra
 
             atraso = (instante_atual - ultima['_data']).total_seconds()
-            if atraso > cfg['offline_timeout']:
-                status = 'offline'
-            elif (
-                ultima['_cpu'] >= cfg['limite_cpu']
-                or ultima['_ram'] >= cfg['limite_ram']
-                or ultima['_disco'] >= cfg['limite_disco']
-            ):
-                status = 'atencao'
-            else:
-                status = 'online'
-
             up, down = taxas.get(ultima['_data'], (None, None))
-            if status != 'offline' and up is not None:
-                upload_atual += up
-                download_atual += down
 
-            # Transforma as capturas em pontos prontos para o gráfico individual.
-            grafico_recursos = []
+            # Transforma as capturas em pontos prontos para os gráficos da NOC.
             series_24h_noc = []
             for minuto, amostra in sorted(recursos.items()):
                 horario_str = minuto.strftime('%Y-%m-%d %H:%M')
-                grafico_recursos.append({
-                    'horario': horario_str,
-                    'cpu_pct': amostra['_cpu'],
-                    'ram_pct': amostra['_ram'],
-                    'disco_pct': amostra['_disco'],
-                })
                 down_m, up_m = rede_por_minuto.get(minuto, (None, None))
                 series_24h_noc.append({
                     'horario': horario_str,
@@ -189,25 +163,6 @@ def run(s3=None, *, agora=None):
                     'download_mbps': round(down_m, 2) if down_m is not None else None,
                     'upload_mbps': round(up_m, 2) if up_m is not None else None,
                 })
-
-            if grafico_recursos:
-                ultimo_ponto = grafico_recursos[-1]
-                metricas_atuais = {
-                    'cpu_pct': ultimo_ponto['cpu_pct'],
-                    'ram_pct': ultimo_ponto['ram_pct'],
-                    'disco_pct': ultimo_ponto['disco_pct'],
-                }
-            else:
-                metricas_atuais = {'cpu_pct': None, 'ram_pct': None, 'disco_pct': None}
-
-            atuais.append({
-                'id_servidor': id_servidor,
-                'nome': ultima.get('username') or f'Servidor {id_servidor}',
-                'status': status,
-                'ultima_coleta': ultima['data_hora'],
-                'metricas_atuais': metricas_atuais,
-                'graficos': {'recursos_24h': grafico_recursos},
-            })
 
             noc_servidores.append({
                 'id_servidor': id_servidor,
@@ -225,33 +180,6 @@ def run(s3=None, *, agora=None):
                 'series_24h': series_24h_noc,
                 'processos': processos_por_servidor.get((id_empresa, id_servidor), []),
             })
-
-        online = sum(1 for s in atuais if s['status'] == 'online')
-        atencao = sum(1 for s in atuais if s['status'] == 'atencao')
-        offline = sum(1 for s in atuais if s['status'] == 'offline')
-        documento = {
-            'id_empresa': empresa,
-            'gerado_em': instante_atual.isoformat(),
-            'kpis': {
-                'total_servidores': len(atuais),
-                'servidores_online': online,
-                'servidores_atencao': atencao,
-                'servidores_offline': offline,
-                'upload_mbps': round(upload_atual, 2),
-                'download_mbps': round(download_atual, 2),
-                'trafego_mbps': round(upload_atual + download_atual, 2),
-            },
-            'servidores': sorted(atuais, key=lambda x: x['id_servidor']),
-        }
-
-        chave = f"{cfg['gold']}empresa-{empresa}/dashboard.json"
-        s3.put_object(
-            Bucket=bucket,
-            Key=chave,
-            Body=json.dumps(documento, ensure_ascii=False, indent=2, allow_nan=False),
-            ContentType='application/json'
-        )
-        print(f'Gerado: {chave} ({len(atuais)} servidores)')
 
         documento_noc = {
             'id_empresa': empresa,

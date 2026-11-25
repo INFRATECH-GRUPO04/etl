@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -20,9 +21,12 @@ GOLD = os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/'
 GOLD_BUCKET = os.getenv('S3_GOLD_BUCKET') or BUCKET
 OFFLINE_TIMEOUT = int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900'))
 FREQUENCIA = int(os.getenv('FREQUENCIA_ESPERADA_SEGUNDOS', '60'))
-JANELAS = {'24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400}
 FUSO_LOCAL = ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo'))
 DIAS_SEMANA = ('Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom')
+DIAS_HISTORICO = 40
+
+# Partição da silver: .../data=AAAA-MM-DD/...
+DATA_NA_CHAVE = re.compile(r'(?:^|/)data=(\d{4}-\d{2}-\d{2})(?:/|$)')
 
 s3 = boto3.client('s3')
 servidores = defaultdict(dict)
@@ -37,31 +41,43 @@ def disponibilidade(lista, inicio, fim):
 
 
 def serie_frota(listas, segundos, passos, rotulo):
-    def serie(fim):
-        inicio = fim - timedelta(seconds=segundos * passos)
-        rotulos, valores = [], []
-        for i in range(passos):
-            inicio_bucket = inicio + timedelta(seconds=segundos * i)
-            fim_bucket = inicio_bucket + timedelta(seconds=segundos)
-            pontos = [disponibilidade(lista, inicio_bucket, fim_bucket) for lista in listas]
-            pontos = [v for v in pontos if v is not None]
-            rotulos.append(rotulo(inicio_bucket))
-            valores.append(round(sum(pontos) / len(pontos), 1) if pontos else None)
-        validos = [v for v in valores if v is not None]
-        media = round(sum(validos) / len(validos), 1) if validos else None
-        return rotulos, valores, media
-
-    rotulos, valores, media = serie(agora)
-    _, _, anterior = serie(agora - timedelta(seconds=segundos * passos))
-    return {'rotulos': rotulos, 'valores': valores, 'media': media, 'anterior': anterior}
+    inicio = agora - timedelta(seconds=segundos * passos)
+    rotulos, valores = [], []
+    for i in range(passos):
+        inicio_bucket = inicio + timedelta(seconds=segundos * i)
+        fim_bucket = inicio_bucket + timedelta(seconds=segundos)
+        pontos = [disponibilidade(lista, inicio_bucket, fim_bucket) for lista in listas]
+        pontos = [v for v in pontos if v is not None]
+        rotulos.append(rotulo(inicio_bucket))
+        valores.append(round(sum(pontos) / len(pontos), 1) if pontos else None)
+    return {'rotulos': rotulos, 'valores': valores}
 
 
-# Lê todas as coletas da Silver; horários sem fuso são considerados locais.
+# O filtro de 40 dias é aplicado pela chave antes de baixar o objeto.
+agora = datetime.now(timezone.utc)
+limite = agora.astimezone(FUSO_LOCAL).date() - timedelta(days=DIAS_HISTORICO)
+processados = 0
+ignorados = 0
+
+# Lê as coletas da Silver; horários sem fuso são considerados locais.
 for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix=SILVER + 'metricas/'):
     for objeto in pagina.get('Contents', []):
-        if not objeto['Key'].endswith('_dados.csv'):
+        chave = objeto['Key']
+        if not chave.endswith('_dados.csv'):
             continue
-        texto = s3.get_object(Bucket=BUCKET, Key=objeto['Key'])['Body'].read().decode('utf-8-sig')
+
+        particao = DATA_NA_CHAVE.search(chave)
+        if particao:
+            try:
+                data_particao = datetime.strptime(particao.group(1), '%Y-%m-%d').date()
+            except ValueError:
+                data_particao = None
+            if data_particao is not None and data_particao < limite:
+                ignorados += 1
+                continue
+
+        processados += 1
+        texto = s3.get_object(Bucket=BUCKET, Key=chave)['Body'].read().decode('utf-8-sig')
         for linha in csv.DictReader(io.StringIO(texto)):
             try:
                 empresa = int(linha['id_empresa'])
@@ -78,11 +94,11 @@ for pagina in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET, Prefix
             except (KeyError, ValueError, TypeError):
                 continue
 
-agora = datetime.now(timezone.utc)
+print(f'Objetos silver: {processados} processados, {ignorados} ignorados por terem mais de {DIAS_HISTORICO} dias.')
+
 empresas = sorted({empresa for empresa, servidor in servidores})
 
 rotulos = {
-    '24h': lambda ini: ini.astimezone(FUSO_LOCAL).strftime('%Hh'),
     '7d': lambda ini: DIAS_SEMANA[ini.astimezone(FUSO_LOCAL).weekday()],
     '30d': lambda ini: ini.astimezone(FUSO_LOCAL).strftime('%d/%m'),
 }
@@ -102,48 +118,24 @@ for empresa in empresas:
 
         servidores_empresa.append({
             'id_servidor': id_servidor,
-            'nome': None,
-            'cidade': None,
             'conexao': conexao,
-            'ultima_leitura': ultima['_data'].isoformat(),
-            'tempo_min': None,
-            'situacao': None,
-            'inc7d': None,
+            'ultima_leitura': ultima['_data'].astimezone(FUSO_LOCAL).isoformat(),
             'atual': {
                 'cpu': ultima['_cpu'],
                 'ram': ultima['_ram'],
                 'disco': ultima['_disco'],
             },
-            'disponibilidade_pct': {
-                '24h': disponibilidade(lista, agora - timedelta(seconds=JANELAS['24h']), agora),
-            },
         })
 
     servidores_empresa.sort(key=lambda s: s['id_servidor'])
     documento = {
-        'versao': 1,
+        'versao': 2,
         'id_empresa': empresa,
-        'gerado_em': agora.isoformat(),
-        'ambiente': None,
+        'gerado_em': agora.astimezone(FUSO_LOCAL).isoformat(),
         'servidores': servidores_empresa,
         'disponibilidade_frota': {
-            '24h': serie_frota(listas, JANELAS['24h'] / 24, 24, rotulos['24h']),
             '7d': serie_frota(listas, 86400, 7, rotulos['7d']),
             '30d': serie_frota(listas, 86400, 30, rotulos['30d']),
-        },
-        'incidentes': {
-            'abertos': [],
-            'por_dia': {
-                '7d': {'rotulos': [], 'valores': [], 'anterior': None},
-                '30d': {'rotulos': [], 'valores': [], 'anterior': None},
-            },
-            'mttr': {'minutos': None, 'periodo': '(últimos 30d)'},
-        },
-        'relatorio_ia': {
-            'gerado_em': None,
-            'resumo': '',
-            'pontos': [],
-            'recomendacoes': [],
         },
     }
 

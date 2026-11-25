@@ -1,146 +1,302 @@
 
 {
-  "id_empresa": 1,
-  "id_servidor": 5,
+  "id_empresa": 2,
+  "id_servidor": 3,
   "nome_servidor": "Servidor_Game_01",
-  "lote": "2026-11-23 12:00:00",
-  "gerado_em": "2026-11-23T15:00:05+00:00",
+  "data": "2026-11-24",
+  "gerado_em": "2026-11-24T15:30:00+00:00",
+
   "medias": {
-    "cpu": 48.5,
-    "ram": 72.3,
-    "disco": 65.8,
-    "rede": 32.4
+    "cpu": 48.0,
+    "ram": 72.0,
+    "disco": 65.7,
+    "rede": 32.5
   },
-  "capturas": [
+
+  "horarios": [
     {
-      "dataHora": "2026-11-23 11:51:00",
-      "cpu": 40.0,
-      "ram": 70.0,
-      "disco": 65.0,
-      "rede": 28.5,
-      "variacao": {
-        "cpu": 2.5,
-        "ram": 1.0,
-        "disco": 0.2,
-        "rede": 1.5
-      }
+      "lote": "2026-11-24 10:02:00",
+      "arquivo": "20261124T130000Z_empresa-2_servidor-3_dados.csv",
+
+      "medias": {
+        "cpu": 43.3,
+        "ram": 70.0,
+        "disco": 65.0,
+        "rede": 30.0
+      },
+
+      "capturas": [
+        {
+          "dataHora": "2026-11-24 10:02:00",
+          "cpu": 40.0,
+          "ram": 68.0,
+          "disco": 64.8,
+          "rede": null,
+          "variacao": null
+        },
+        {
+          "dataHora": "2026-11-24 10:03:00",
+          "cpu": 42.0,
+          "ram": 70.0,
+          "disco": 65.0,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": null
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:04:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:05:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:06:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:07:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:08:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:09:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:10:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:11:00",
+          "cpu": 48.0,
+          "ram": 72.0,
+          "disco": 65.2,
+          "rede": 30.0,
+          "variacao": {
+            "cpu": 6.0,
+            "ram": 2.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        }
+      ]
     },
+
     {
-      "dataHora": "2026-11-23 11:52:00",
-      "cpu": 42.5,
-      "ram": 71.0,
-      "disco": 65.2,
-      "rede": 30.0,
-      "variacao": {
-        "cpu": 2.5,
-        "ram": 1.0,
-        "disco": 0.2,
-        "rede": 1.5
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:53:00",
-      "cpu": 45.0,
-      "ram": 72.0,
-      "disco": 65.4,
-      "rede": 35.0,
-      "variacao": {
-        "cpu": 2.5,
-        "ram": 1.0,
-        "disco": 0.2,
-        "rede": 5.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:54:00",
-      "cpu": 47.0,
-      "ram": 73.0,
-      "disco": 65.5,
-      "rede": 32.0,
-      "variacao": {
-        "cpu": 2.0,
-        "ram": 1.0,
-        "disco": 0.1,
-        "rede": -3.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:55:00",
-      "cpu": 50.0,
-      "ram": 74.0,
-      "disco": 65.7,
-      "rede": 34.0,
-      "variacao": {
-        "cpu": 3.0,
-        "ram": 1.0,
-        "disco": 0.2,
-        "rede": 2.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:56:00",
-      "cpu": 52.0,
-      "ram": 73.5,
-      "disco": 65.8,
-      "rede": 36.0,
-      "variacao": {
-        "cpu": 2.0,
-        "ram": -0.5,
-        "disco": 0.1,
-        "rede": 2.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:57:00",
-      "cpu": 55.0,
-      "ram": 72.5,
-      "disco": 66.0,
-      "rede": 35.0,
-      "variacao": {
-        "cpu": 3.0,
-        "ram": -1.0,
-        "disco": 0.2,
-        "rede": -1.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:58:00",
-      "cpu": 51.0,
-      "ram": 72.0,
-      "disco": 66.2,
-      "rede": 30.0,
-      "variacao": {
-        "cpu": -4.0,
-        "ram": -0.5,
-        "disco": 0.2,
-        "rede": -5.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 11:59:00",
-      "cpu": 49.0,
-      "ram": 73.0,
-      "disco": 66.3,
-      "rede": 29.0,
-      "variacao": {
-        "cpu": -2.0,
-        "ram": 1.0,
-        "disco": 0.1,
-        "rede": -1.0
-      }
-    },
-    {
-      "dataHora": "2026-11-23 12:00:00",
-      "cpu": 53.0,
-      "ram": 72.0,
-      "disco": 66.5,
-      "rede": 34.0,
-      "variacao": {
-        "cpu": 4.0,
-        "ram": -1.0,
-        "disco": 0.2,
-        "rede": 5.0
-      }
+      "lote": "2026-11-24 10:12:00",
+      "arquivo": "20261124T180000Z_empresa-2_servidor-3_dados.csv",
+
+      "medias": {
+        "cpu": 52.7,
+        "ram": 74.0,
+        "disco": 66.0,
+        "rede": 35.0
+      },
+
+      "capturas": [
+        {
+          "dataHora": "2026-11-24 10:12:00",
+          "cpu": 50.0,
+          "ram": 73.0,
+          "disco": 65.8,
+          "rede": null,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.6,
+            "rede": null
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:13:00",
+          "cpu": 53.0,
+          "ram": 74.0,
+          "disco": 66.0,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 3.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": null
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:14:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:15:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:16:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:17:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:18:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:19:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:20:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        },
+        {
+          "dataHora": "2026-11-24 10:21:00",
+          "cpu": 55.0,
+          "ram": 75.0,
+          "disco": 66.2,
+          "rede": 35.0,
+          "variacao": {
+            "cpu": 2.0,
+            "ram": 1.0,
+            "disco": 0.2,
+            "rede": 0.0
+          }
+        }
+      ]
     }
   ]
 }

@@ -373,3 +373,92 @@
 **Resultado da IA:**
 - Explicado que `ERR_CONNECTION_REFUSED` significa que não há servidor ouvindo na porta usada pelo `fetch`; o Node precisa ser iniciado novamente após o reboot da EC2 e a página deve ser aberta pelo endereço do app (porta `3333` do `.env.dev`), não por arquivo local ou outra porta.
 - Orientado a validar no servidor com `curl -I http://localhost:3333/` e conferir os logs de inicialização (`ARQUIVO ENV`, `BANCO CARREGADO`), além de verificar se `localhost` no navegador não aponta para o PC em vez da EC2.
+
+### Prompt 11 - site institucional
+
+**Enviado:**
+> altere as rotas de conexão com a aws s3 para que utilize o token e as chaves de acesso, pois o site está na ec2
+
+**Resultado da IA:**
+- Criado `src/database/s3Config.js`: cliente S3 único com `region` e `credentials` explícitas (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e `AWS_SESSION_TOKEN`) lidas do `.env`; se as chaves não existirem, mantém o comportamento anterior de cadeia padrão do SDK.
+- `agenteController.js` (envio para `01-bronze/`) e `s3GoldModel.js` (leitura em `03-gold/`) agora usam o cliente compartilhado.
+- `.env.example` documenta as três variáveis de credencial; `.env`/`.env.dev` já as possuem. Sintaxe validada com `node --check`.
+
+### Prompt 12 - site institucional
+
+**Enviado:**
+> foi feito commits?
+
+**Resultado da IA:**
+- Respondido que não foi feito nenhum commit; as alterações estão pendentes no working tree (`git status`) e o último commit continua sendo `e387e62 feat/ adiciona rotas de conexão com s3`.
+
+### Prompt 13 - site institucional
+
+**Enviado:**
+> http://54.198.122.144:3333/dashboardSarah/teste-s3 está dando erro : {"erro":"Sessão inválida ou expirada"}, o que pode ser? (mensagem enviada duas vezes)
+
+**Resultado da IA:**
+- Explicado que o `401` vem do middleware `autenticar` em `src/seguranca/autorizacao.js:94`, quando o cookie `infratech_session` não é enviado, está alterado, expirou (12 h) ou foi assinado com outro segredo.
+- Causa mais provável identificada: `AUTH_TOKEN_SECRET` não está configurado no `.env.dev`, então cada restart da app gera um segredo aleatório novo e invalida todos os cookies antigos (a EC2 foi reiniciada várias vezes).
+- Orientado a logar novamente no mesmo host/porta, conferir o cookie no DevTools e definir um `AUTH_TOKEN_SECRET` fixo no `.env`/`.env.dev` antes de reiniciar. Nenhum código alterado.
+
+### Prompt 14 - site institucional
+
+**Enviado:**
+> consegui conectar como s3 como teste
+> agora fiz o caminho no meu s3 e coloquei o arquivo perfeito-sarah.json para o gold
+> apaguei o que eu achei de teste
+> falta algum script de teste? (mensagem enviada duas vezes)
+
+**Resultado da IA:**
+- Verificado que não há script automatizado de testes no site (`package.json` só tem `start`/`dev`) e que as rotas temporárias `/teste-s3` e `/teste-s3-lista` foram removidas corretamente; sobraram apenas os helpers não usados `lerChave`/`listarRaiz` em `s3GoldModel.js`.
+- Alertado que o arquivo manual `perfeito-sarah.json` não é lido pelas rotas reais: elas exigem `03-gold/empresa_id=X/servidor_id=Y/data=AAAA-MM-DD/dashboard_sarah.json` com o campo `capturas`, conforme `silver2gold.py`.
+- Alertado que o front ainda consome dados mock (`dashboard-data.js`) e não chama `/dashboardSarah/resumo` nem `/historico`, então o JSON no gold ainda não aparece nos gráficos. Nenhum código alterado.
+
+### Prompt 15 - site institucional
+
+**Enviado:**
+> os helpers são usados pelas rotas reais?
+
+**Resultado da IA:**
+- Confirmado por busca no código que `lerChave` e `listarRaiz` (`s3GoldModel.js:94-110`) não têm chamadores; só aparecem na exportação da linha 112, resquício das rotas de teste removidas.
+- As rotas reais usam `lerServidor` e `ultimaLeitura` (`dashboardSarahController.js:67,81`), que dependem das funções internas `listar` e `lerObjeto` (`s3GoldModel.js:10,38`). Remover os dois helpers órfãos não afeta as rotas. Nenhum código alterado.
+
+### Prompt 16 - site institucional
+
+**Enviado:**
+> pode remover por favor
+
+**Resultado da IA:**
+- Removidos `lerChave` e `listarRaiz` de `src/models/s3GoldModel.js` e ajustado `module.exports` para exportar somente `lerServidor` e `ultimaLeitura`. Sintaxe validada com `node --check`.
+
+### Prompt 17 - site institucional
+
+**Enviado:**
+> onde eu preciso alterar para mudar o caminho do s3?
+
+**Resultado da IA:**
+- Listado onde mudar conforme o caso: bucket/região em `.env.dev`/`.env` (`S3_BUCKET`, `AWS_REGION`); prefixo bronze em `agenteController.js:88` (e fallback local em `:100`); prefixo/nome do gold em `s3GoldModel.js:3,4,7`.
+- No repositório ETL, os prefixos vêm de `S3_BRONZE_PREFIX`/`S3_SILVER_PREFIX` em `bronze2silver.py:15-16`, `S3_SILVER_PREFIX`/`S3_GOLD_PREFIX` em `silver2gold.py:18-19`, com a chave gold montada em `silver2gold.py:119`.
+- Reforçado que alterar o prefixo gold exige mudança compatível no site e no ETL. Nenhum código alterado.
+
+### Prompt 18 - site institucional
+
+**Enviado:**
+> adicionei agora uma validação: se alguma data estiver sem dados é para limpar a tela até que o usuário insira as datas
+> ou é melhor só deixar os gráficos e kpis em branco?
+
+**Resultado da IA:**
+- Recomendado estado vazio explícito ("Sem dados para o período"/"Selecione as datas") dentro de `corpo_dashboard`, em vez de gráficos/KPIs em branco ou zeros falsos, seguindo `AGENTS.md` e o padrão de `mostrarSemServidor()` (`dashboard_sarah.html:443`).
+- Apontado que a validação adicionada em `dashboard_sarah.html:819-832` nunca dispara porque `input[type=date]`, quando vazio, retorna `''` e não `null`; além disso roda apenas no carregamento e não há renderização de volta quando as datas são escolhidas.
+- Sugerido validar no `change` dos dois filtros (`''`, ordem início/fim) e chamar o estado vazio também quando a API responder sem série; alertado sobre o `fetch` de teste com IP fixo em `:835`. Nenhum código alterado.
+
+### Prompt 19 - site institucional
+
+**Enviado:**
+> como conectar a minha página com o s3?
+
+**Resultado da IA:**
+- Explicado que o navegador não deve acessar o S3 diretamente: a página chama as rotas locais `/dashboardSarah/resumo` e `/dashboardSarah/historico/:idServidor?inicio=...&fim=...`, que leem o gold no back-end (`s3Config.js` → `s3GoldModel.js` → controller).
+- Detalhado que é preciso estar logado no mesmo host/porta (cookie `infratech_session`), usar URLs relativas (não o IP fixo do teste), tratar `401`, `204` (sem dados) e popular KPIs/gráficos a partir do JSON de `capturas`/`leitura`.
+- Reforçado que o arquivo no S3 precisa estar em `03-gold/empresa_id=X/servidor_id=Y/data=AAAA-MM-DD/dashboard_sarah.json`; o `perfeito-sarah.json` só serviu para testar a conexão. Nenhum código alterado, exemplo de `fetch` fornecido.

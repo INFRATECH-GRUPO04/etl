@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo
 import boto3
 
 
+# (Cláudia - M) Define o período móvel mantido no histórico consolidado da Gold.
+GOLD_RETENTION_DAYS = 180
+
+
 def carregar_configuracao():
     """Carrega as configurações locais e os parâmetros operacionais da ETL."""
     caminho_env = os.path.join(os.path.dirname(__file__), '.env')
@@ -132,8 +136,10 @@ def ler_manifesto(s3, bucket, chave):
 
 # (Cláudia - M) Organiza as capturas válidas por servidor e dia UTC e publica as partições
 # que os endpoints da investigação usam para consultar o histórico real no S3.
-def publicar_historico(s3, bucket, raiz, empresa, id_servidor, amostras, taxas, frequencia):
+def publicar_historico(s3, bucket, raiz, empresa, id_servidor, amostras, taxas, frequencia,
+                       consolidar=False):
     dias = defaultdict(list)
+    particoes_consolidadas = []
     for amostra in amostras:
         if not captura_historica_valida(amostra):
             continue
@@ -164,9 +170,8 @@ def publicar_historico(s3, bucket, raiz, empresa, id_servidor, amostras, taxas, 
             json.dumps(documento, ensure_ascii=False, allow_nan=False).encode('utf-8')
         ).hexdigest()
 
-        if ler_manifesto(s3, bucket, manifesto).get('etag_origem') != assinatura_origem:
-            gravar_json_historico(s3, bucket, chave, documento)
-            gravar_json_historico(s3, bucket, manifesto, {
+        if consolidar or ler_manifesto(s3, bucket, manifesto).get('etag_origem') != assinatura_origem:
+            manifesto_documento = {
                 **identificacao,
                 'etag_origem': assinatura_origem,
                 'chave_historico': chave,
@@ -174,14 +179,22 @@ def publicar_historico(s3, bucket, raiz, empresa, id_servidor, amostras, taxas, 
                     datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
                     for item in capturas
                 ], frequencia),
-            })
+            }
+            if consolidar:
+                particoes_consolidadas.append({
+                    'documento': documento,
+                    'manifesto': manifesto_documento,
+                })
+            else:
+                gravar_json_historico(s3, bucket, chave, documento)
+                gravar_json_historico(s3, bucket, manifesto, manifesto_documento)
         particoes.append(chave)
 
     capturas_validas = [amostra for amostra in amostras if captura_historica_valida(amostra)]
     if not capturas_validas:
         return None
     datas_validas = [item['_data'] for item in capturas_validas]
-    return {
+    resultado = {
         'id_servidor': id_servidor,
         'particoes': particoes,
         'primeira_captura': datas_validas[0].isoformat(timespec='microseconds').replace('+00:00', 'Z'),
@@ -189,6 +202,9 @@ def publicar_historico(s3, bucket, raiz, empresa, id_servidor, amostras, taxas, 
         'frequencia_esperada_segundos': frequencia,
         **resumo_coleta(datas_validas, frequencia),
     }
+    if consolidar:
+        resultado['particoes_consolidadas'] = particoes_consolidadas
+    return resultado
 
 
 def publicar_empresa(s3, bucket, gold, empresa, servidores, agora, fuso, limites,
@@ -199,7 +215,9 @@ def publicar_empresa(s3, bucket, gold, empresa, servidores, agora, fuso, limites
     # (Cláudia - M) Reúne somente servidores com capturas válidas para montar
     # os limites de datas e as partições disponíveis na Gold histórica.
     historicos = []
+    particoes_historicas = []
     upload_atual = download_atual = 0
+    limite_inferior_retencao = agora - timedelta(days=GOLD_RETENTION_DAYS)
 
     for (id_empresa, id_servidor), amostras in servidores.items():
         if id_empresa != empresa:
@@ -235,10 +253,17 @@ def publicar_empresa(s3, bucket, gold, empresa, servidores, agora, fuso, limites
 
         # (Cláudia - M) Publica o histórico deste servidor sem alterar os registros
         # usados para status, KPIs e gráficos operacionais das outras dashboards.
+        # (Cláudia - M) Filtra a janela inclusiva em UTC apenas para o histórico consolidado.
+        amostras_historicas = [
+            amostra for amostra in lista
+            if limite_inferior_retencao <= amostra['_data'] <= agora
+        ]
         historico_servidor = publicar_historico(
-            s3, bucket, raiz, empresa, id_servidor, lista, taxas, frequencia
+            s3, bucket, raiz, empresa, id_servidor, amostras_historicas, taxas, frequencia,
+            consolidar=True
         )
         if historico_servidor:
+            particoes_historicas.extend(historico_servidor.pop('particoes_consolidadas'))
             historicos.append(historico_servidor)
 
         atraso = (agora - ultima['_data']).total_seconds()
@@ -312,14 +337,47 @@ def publicar_empresa(s3, bucket, gold, empresa, servidores, agora, fuso, limites
         'capturas_validas': sum(item['capturas_validas'] for item in historicos),
         'servidores': historicos,
     }
-    gravar_json_historico(s3, bucket, f'{raiz}historico/metadados.json', metadados)
+    # (Cláudia - M) Reúne metadados, partições e manifestos no mesmo dashboard.json,
+    # mantendo os dados operacionais legados no nível superior do documento.
+    # (Cláudia - M) Declara uma vez os campos das capturas e valida os IDs antes de
+    # removê-los das linhas, mantendo empresa e servidor identificados na partição.
+    colunas_captura = [
+        'timestamp', 'nome_servidor', 'cpu_pct', 'ram_pct', 'disco_pct',
+        'upload_mbps', 'download_mbps', 'rede_mbps', 'bytes_enviados',
+        'bytes_recebidos',
+    ]
+    particoes_compactadas = []
+    for particao in particoes_historicas:
+        documento_particao = particao['documento']
+        id_empresa_particao = documento_particao['id_empresa']
+        id_servidor_particao = documento_particao['id_servidor']
+        capturas = documento_particao['capturas']
+        if any(
+            captura['id_empresa'] != id_empresa_particao
+            or captura['id_servidor'] != id_servidor_particao
+            for captura in capturas
+        ):
+            raise ValueError('Os IDs das capturas não correspondem à partição histórica.')
+        particoes_compactadas.append({
+            'documento': {
+                **{campo: valor for campo, valor in documento_particao.items() if campo != 'capturas'},
+                'capturas': [[captura[campo] for campo in colunas_captura] for captura in capturas],
+            },
+            'manifesto': particao['manifesto'],
+        })
+
+    documento['historico'] = {
+        'metadados': metadados,
+        'colunas_captura': colunas_captura,
+        'particoes_historicas': particoes_compactadas,
+    }
 
     # Preserva a gravação legada para manter inalterado o JSON das dashboards existentes.
     chave = f'{gold}empresa-{empresa}/dashboard.json'
     s3.put_object(
         Bucket=bucket,
         Key=chave,
-        Body=json.dumps(documento, ensure_ascii=False, indent=2),
+        Body=json.dumps(documento, ensure_ascii=False, separators=(',', ':')),
         ContentType='application/json'
     )
     print(f'Gerado: {chave} ({len(atuais)} servidores)')

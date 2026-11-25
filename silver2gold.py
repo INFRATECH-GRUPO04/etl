@@ -3,7 +3,7 @@ import io
 import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, time, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import boto3
@@ -22,8 +22,8 @@ GOLD_BUCKET = os.getenv('S3_GOLD_BUCKET') or BUCKET
 OFFLINE_TIMEOUT = int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900'))
 FREQUENCIA = int(os.getenv('FREQUENCIA_ESPERADA_SEGUNDOS', '60'))
 FUSO_LOCAL = ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo'))
-DIAS_SEMANA = ('Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom')
 DIAS_HISTORICO = 40
+DIAS_SERIE = 30
 
 # Partição da silver: .../data=AAAA-MM-DD/...
 DATA_NA_CHAVE = re.compile(r'(?:^|/)data=(\d{4}-\d{2}-\d{2})(?:/|$)')
@@ -32,24 +32,43 @@ s3 = boto3.client('s3')
 servidores = defaultdict(dict)
 
 
-def disponibilidade(lista, inicio, fim):
-    if not lista:
+def ponto_servidor(lista, dia, agora):
+    """Um dia de calendário em FUSO_LOCAL. O dia de hoje vai só até `agora`."""
+    inicio = datetime.combine(dia, time.min, tzinfo=FUSO_LOCAL).astimezone(timezone.utc)
+    if dia == agora.astimezone(FUSO_LOCAL).date():
+        fim = agora
+    else:
+        fim = datetime.combine(dia + timedelta(days=1), time.min, tzinfo=FUSO_LOCAL).astimezone(timezone.utc)
+
+    # Antes da primeira captura do servidor o dia não tem ponto (None, não 0).
+    if not lista or fim <= lista[0]['_data']:
         return None
-    recebidas = sum(1 for a in lista if inicio <= a['_data'] < fim)
-    esperadas = (fim - inicio).total_seconds() / FREQUENCIA
-    return round(min(100, recebidas / esperadas * 100), 1) if esperadas > 0 else None
+
+    inicio_efetivo = max(inicio, lista[0]['_data'])
+    esperadas = (fim - inicio_efetivo).total_seconds() / FREQUENCIA
+    if esperadas <= 0:
+        return None
+    recebidas = sum(1 for a in lista if inicio_efetivo <= a['_data'] < fim)
+    return min(100, recebidas / esperadas * 100), recebidas, esperadas
 
 
-def serie_frota(listas, segundos, passos, rotulo):
-    inicio = agora - timedelta(seconds=segundos * passos)
+def serie_frota(listas, agora):
+    """30 dias de calendário; a frota é ponderada por recebidas/esperadas."""
+    hoje = agora.astimezone(FUSO_LOCAL).date()
     rotulos, valores = [], []
-    for i in range(passos):
-        inicio_bucket = inicio + timedelta(seconds=segundos * i)
-        fim_bucket = inicio_bucket + timedelta(seconds=segundos)
-        pontos = [disponibilidade(lista, inicio_bucket, fim_bucket) for lista in listas]
-        pontos = [v for v in pontos if v is not None]
-        rotulos.append(rotulo(inicio_bucket))
-        valores.append(round(sum(pontos) / len(pontos), 1) if pontos else None)
+    for passo in range(DIAS_SERIE - 1, -1, -1):
+        dia = hoje - timedelta(days=passo)
+        soma_recebidas = soma_esperadas = 0
+        for lista in listas:
+            ponto = ponto_servidor(lista, dia, agora)
+            if ponto is None:
+                continue
+            _, recebidas, esperadas = ponto
+            soma_recebidas += recebidas
+            soma_esperadas += esperadas
+        valor = min(100, soma_recebidas / soma_esperadas * 100) if soma_esperadas else None
+        rotulos.append(dia.strftime('%d/%m'))
+        valores.append(round(valor, 1) if valor is not None else None)
     return {'rotulos': rotulos, 'valores': valores}
 
 
@@ -98,11 +117,6 @@ print(f'Objetos silver: {processados} processados, {ignorados} ignorados por ter
 
 empresas = sorted({empresa for empresa, servidor in servidores})
 
-rotulos = {
-    '7d': lambda ini: DIAS_SEMANA[ini.astimezone(FUSO_LOCAL).weekday()],
-    '30d': lambda ini: ini.astimezone(FUSO_LOCAL).strftime('%d/%m'),
-}
-
 for empresa in empresas:
     servidores_empresa = []
     listas = []
@@ -128,14 +142,18 @@ for empresa in empresas:
         })
 
     servidores_empresa.sort(key=lambda s: s['id_servidor'])
+    frota = serie_frota(listas, agora)
     documento = {
         'versao': 2,
         'id_empresa': empresa,
         'gerado_em': agora.astimezone(FUSO_LOCAL).isoformat(),
         'servidores': servidores_empresa,
         'disponibilidade_frota': {
-            '7d': serie_frota(listas, 86400, 7, rotulos['7d']),
-            '30d': serie_frota(listas, 86400, 30, rotulos['30d']),
+            '7d': {
+                'rotulos': frota['rotulos'][-7:],
+                'valores': frota['valores'][-7:],
+            },
+            '30d': frota,
         },
     }
 

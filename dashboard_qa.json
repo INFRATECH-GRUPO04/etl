@@ -1,0 +1,465 @@
+{
+  "gerado_em": "2026-11-21T19:40:00+00:00",
+  "empresas": [
+    {
+      "id_empresa": 1,
+      "servidores": [
+        {
+          "id_servidor": 3,
+          "nome": "SRV-BR-01",
+          "status": "online",
+          "ultima_coleta": "2026-11-21 16:40:00",
+          "jogadores_atuais": 81,
+          "kpis": {
+            "indice_crescimento_memoria": {
+              "valor_mb_h": 655.4
+            },
+            "taxa_troca_contexto": {
+              "valor_trocas_s": 45260
+            },
+            "tempo_fila_disco": {
+              "valor_ms": 4800
+            },
+            "eficiencia_payload": {
+              "valor_bytes_s_jogador": 4012.3
+            }
+          },
+          "graficos": {
+            "consumo_recursos_24h": {
+              "cpu_pct": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 69.4
+                }
+              ],
+              "ram_gb": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 3.58
+                }
+              ],
+              "disco_mb": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 188219.4
+                }
+              ],
+              "rede_mbps": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 2.6
+                }
+              ]
+            },
+            "escalabilidade_jogadores": {
+              "max_jogadores_suportados": 105,
+              "consumo_unitario_por_jogador": {
+                "cpu_pct": 0.86,
+                "ram_gb": 0.044,
+                "rede_mbps": 0.032
+              },
+              "projecao": [
+                {
+                  "jogadores": 0,
+                  "cpu_pct": 0.0,
+                  "ram_gb": 0.0,
+                  "rede_mbps": 0.0
+                },
+                {
+                  "jogadores": 15,
+                  "cpu_pct": 12.9,
+                  "ram_gb": 0.66,
+                  "rede_mbps": 0.48
+                },
+                {
+                  "jogadores": 30,
+                  "cpu_pct": 25.7,
+                  "ram_gb": 1.33,
+                  "rede_mbps": 0.96
+                },
+                {
+                  "jogadores": 45,
+                  "cpu_pct": 38.6,
+                  "ram_gb": 1.99,
+                  "rede_mbps": 1.44
+                },
+                {
+                  "jogadores": 60,
+                  "cpu_pct": 51.4,
+                  "ram_gb": 2.65,
+                  "rede_mbps": 1.93
+                },
+                {
+                  "jogadores": 75,
+                  "cpu_pct": 64.3,
+                  "ram_gb": 3.31,
+                  "rede_mbps": 2.41
+                },
+                {
+                  "jogadores": 90,
+                  "cpu_pct": 77.1,
+                  "ram_gb": 3.98,
+                  "rede_mbps": 2.89
+                },
+                {
+                  "jogadores": 105,
+                  "cpu_pct": 90.0,
+                  "ram_gb": 4.64,
+                  "rede_mbps": 3.37
+                },
+                {
+                  "jogadores": 120,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 5.3,
+                  "rede_mbps": 3.85
+                },
+                {
+                  "jogadores": 135,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 5.97,
+                  "rede_mbps": 4.33
+                },
+                {
+                  "jogadores": 150,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 6.63,
+                  "rede_mbps": 4.81
+                }
+              ]
+            },
+            "assinatura_performance": {
+              "janela_analise": "24h_p95",
+              "eixos": [
+                {
+                  "componente": "RAM",
+                  "valor_pct": 44.8
+                },
+                {
+                  "componente": "CPU",
+                  "valor_pct": 69.4
+                },
+                {
+                  "componente": "Disco",
+                  "valor_pct": 71.8
+                },
+                {
+                  "componente": "Rede",
+                  "valor_pct": 2.6
+                },
+                {
+                  "componente": "Eficiência térmica",
+                  "valor_pct": 39.7
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id_servidor": 4,
+          "nome": "SRV-BR-01",
+          "status": "online",
+          "ultima_coleta": "2026-11-21 16:40:00",
+          "jogadores_atuais": 81,
+          "kpis": {
+            "indice_crescimento_memoria": {
+              "valor_mb_h": 655.4
+            },
+            "taxa_troca_contexto": {
+              "valor_trocas_s": 45260
+            },
+            "tempo_fila_disco": {
+              "valor_ms": 4800
+            },
+            "eficiencia_payload": {
+              "valor_bytes_s_jogador": 4012.3
+            }
+          },
+          "graficos": {
+            "consumo_recursos_24h": {
+              "cpu_pct": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 69.4
+                }
+              ],
+              "ram_gb": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 3.58
+                }
+              ],
+              "disco_mb": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 188219.4
+                }
+              ],
+              "rede_mbps": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 2.6
+                }
+              ]
+            },
+            "escalabilidade_jogadores": {
+              "max_jogadores_suportados": 105,
+              "consumo_unitario_por_jogador": {
+                "cpu_pct": 0.86,
+                "ram_gb": 0.044,
+                "rede_mbps": 0.032
+              },
+              "projecao": [
+                {
+                  "jogadores": 0,
+                  "cpu_pct": 0.0,
+                  "ram_gb": 0.0,
+                  "rede_mbps": 0.0
+                },
+                {
+                  "jogadores": 15,
+                  "cpu_pct": 12.9,
+                  "ram_gb": 0.66,
+                  "rede_mbps": 0.48
+                },
+                {
+                  "jogadores": 30,
+                  "cpu_pct": 25.7,
+                  "ram_gb": 1.33,
+                  "rede_mbps": 0.96
+                },
+                {
+                  "jogadores": 45,
+                  "cpu_pct": 38.6,
+                  "ram_gb": 1.99,
+                  "rede_mbps": 1.44
+                },
+                {
+                  "jogadores": 60,
+                  "cpu_pct": 51.4,
+                  "ram_gb": 2.65,
+                  "rede_mbps": 1.93
+                },
+                {
+                  "jogadores": 75,
+                  "cpu_pct": 64.3,
+                  "ram_gb": 3.31,
+                  "rede_mbps": 2.41
+                },
+                {
+                  "jogadores": 90,
+                  "cpu_pct": 77.1,
+                  "ram_gb": 3.98,
+                  "rede_mbps": 2.89
+                },
+                {
+                  "jogadores": 105,
+                  "cpu_pct": 90.0,
+                  "ram_gb": 4.64,
+                  "rede_mbps": 3.37
+                },
+                {
+                  "jogadores": 120,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 5.3,
+                  "rede_mbps": 3.85
+                },
+                {
+                  "jogadores": 135,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 5.97,
+                  "rede_mbps": 4.33
+                },
+                {
+                  "jogadores": 150,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 6.63,
+                  "rede_mbps": 4.81
+                }
+              ]
+            },
+            "assinatura_performance": {
+              "janela_analise": "24h_p95",
+              "eixos": [
+                {
+                  "componente": "RAM",
+                  "valor_pct": 44.8
+                },
+                {
+                  "componente": "CPU",
+                  "valor_pct": 69.4
+                },
+                {
+                  "componente": "Disco",
+                  "valor_pct": 71.8
+                },
+                {
+                  "componente": "Rede",
+                  "valor_pct": 2.6
+                },
+                {
+                  "componente": "Eficiência térmica",
+                  "valor_pct": 39.7
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id_empresa": 2,
+      "servidores": [
+        {
+          "id_servidor": 4,
+          "nome": "SRV-BR-01",
+          "status": "online",
+          "ultima_coleta": "2026-11-21 16:40:00",
+          "jogadores_atuais": 81,
+          "kpis": {
+            "indice_crescimento_memoria": {
+              "valor_mb_h": 655.4
+            },
+            "taxa_troca_contexto": {
+              "valor_trocas_s": 45260
+            },
+            "tempo_fila_disco": {
+              "valor_ms": 4800
+            },
+            "eficiencia_payload": {
+              "valor_bytes_s_jogador": 4012.3
+            }
+          },
+          "graficos": {
+            "consumo_recursos_24h": {
+              "cpu_pct": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 69.4
+                }
+              ],
+              "ram_gb": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 3.58
+                }
+              ],
+              "disco_mb": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 188219.4
+                }
+              ],
+              "rede_mbps": [
+                {
+                  "horario": "2026-11-21 16:30",
+                  "valor": 2.6
+                }
+              ]
+            },
+            "escalabilidade_jogadores": {
+              "max_jogadores_suportados": 105,
+              "consumo_unitario_por_jogador": {
+                "cpu_pct": 0.86,
+                "ram_gb": 0.044,
+                "rede_mbps": 0.032
+              },
+              "projecao": [
+                {
+                  "jogadores": 0,
+                  "cpu_pct": 0.0,
+                  "ram_gb": 0.0,
+                  "rede_mbps": 0.0
+                },
+                {
+                  "jogadores": 15,
+                  "cpu_pct": 12.9,
+                  "ram_gb": 0.66,
+                  "rede_mbps": 0.48
+                },
+                {
+                  "jogadores": 30,
+                  "cpu_pct": 25.7,
+                  "ram_gb": 1.33,
+                  "rede_mbps": 0.96
+                },
+                {
+                  "jogadores": 45,
+                  "cpu_pct": 38.6,
+                  "ram_gb": 1.99,
+                  "rede_mbps": 1.44
+                },
+                {
+                  "jogadores": 60,
+                  "cpu_pct": 51.4,
+                  "ram_gb": 2.65,
+                  "rede_mbps": 1.93
+                },
+                {
+                  "jogadores": 75,
+                  "cpu_pct": 64.3,
+                  "ram_gb": 3.31,
+                  "rede_mbps": 2.41
+                },
+                {
+                  "jogadores": 90,
+                  "cpu_pct": 77.1,
+                  "ram_gb": 3.98,
+                  "rede_mbps": 2.89
+                },
+                {
+                  "jogadores": 105,
+                  "cpu_pct": 90.0,
+                  "ram_gb": 4.64,
+                  "rede_mbps": 3.37
+                },
+                {
+                  "jogadores": 120,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 5.3,
+                  "rede_mbps": 3.85
+                },
+                {
+                  "jogadores": 135,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 5.97,
+                  "rede_mbps": 4.33
+                },
+                {
+                  "jogadores": 150,
+                  "cpu_pct": 100.0,
+                  "ram_gb": 6.63,
+                  "rede_mbps": 4.81
+                }
+              ]
+            },
+            "assinatura_performance": {
+              "janela_analise": "24h_p95",
+              "eixos": [
+                {
+                  "componente": "RAM",
+                  "valor_pct": 44.8
+                },
+                {
+                  "componente": "CPU",
+                  "valor_pct": 69.4
+                },
+                {
+                  "componente": "Disco",
+                  "valor_pct": 71.8
+                },
+                {
+                  "componente": "Rede",
+                  "valor_pct": 2.6
+                },
+                {
+                  "componente": "Eficiência térmica",
+                  "valor_pct": 39.7
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

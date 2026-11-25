@@ -123,7 +123,7 @@ def dash_felipe():
                 registrar_linha_csv(linha)
 
     # --- MODO TESTE LOCAL (comente o bloco S3 acima e descomente abaixo para testar no PC) ---
-    # arquivos_locais = ['dados_v1.csv', 'dados_v2.csv']
+    # arquivos_locais = ['dados_v1.csv', 'dados_v2.csv', 'dados_v3.csv']
     # for caminho in arquivos_locais:
     #     with open(caminho, mode='r', encoding='utf-8-sig') as arquivo:
     #         for linha in csv.DictReader(arquivo):
@@ -141,6 +141,8 @@ def dash_felipe():
     empresas = sorted({empresa for empresa, servidor in servidores})
 
     # ---------------- 3. PROCESSAMENTO POR EMPRESA E POR SERVIDOR ----------------
+
+    lista_empresas_json = []
 
     for empresa in empresas:
         lista_servidores_json = []
@@ -303,29 +305,34 @@ def dash_felipe():
                 },
             })
 
-        # ---------------- 8. GRAVAÇÃO DO JSON FINAL NA CAMADA GOLD ----------------
-
-        documento = {
+        # Guarda os servidores desta empresa na lista geral
+        lista_empresas_json.append({
             'id_empresa': empresa,
-            'gerado_em': agora.isoformat(),
             'servidores': sorted(lista_servidores_json, key=lambda x: x['id_servidor']),
-        }
+        })
 
-        # MODO PRODUÇÃO (EC2 / S3): sobrescreve o JSON da empresa no bucket Gold
-        chave = f'{GOLD}empresa-{empresa}/dashboard.json'
-        s3.put_object(
-            Bucket=BUCKET,
-            Key=chave,
-            Body=json.dumps(documento, ensure_ascii=False, indent=2),
-            ContentType='application/json'
-        )
-        print(f'Gerado: {chave} ({len(lista_servidores_json)} servidores)')
+    # ---------------- 8. GRAVAÇÃO DO JSON ÚNICO NA CAMADA GOLD ----------------
 
-        # MODO TESTE LOCAL (comente o bloco S3 acima e descomente abaixo para salvar local):
-        # arquivo_saida = f'dashboard_empresa_{empresa}.json'
-        # with open(arquivo_saida, mode='w', encoding='utf-8') as f:
-        #     json.dump(documento, f, ensure_ascii=False, indent=2)
-        # print(f'Gerado localmente: {arquivo_saida} ({len(lista_servidores_json)} servidores)')
+    documento = {
+        'gerado_em': agora.isoformat(),
+        'empresas': lista_empresas_json,
+    }
+
+    # MODO PRODUÇÃO (EC2 / S3): sobrescreve o JSON único com todas as empresas no bucket Gold
+    chave = f'{GOLD}dashboard_qa.json'
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=chave,
+        Body=json.dumps(documento, ensure_ascii=False, indent=2),
+        ContentType='application/json'
+    )
+    print(f'Gerado: {chave} ({len(lista_empresas_json)} empresas)')
+
+    # MODO TESTE LOCAL (comente o bloco S3 acima e descomente abaixo para salvar local):
+    # arquivo_saida = 'dashboard_qa.json'
+    # with open(arquivo_saida, mode='w', encoding='utf-8') as f:
+    #     json.dump(documento, f, ensure_ascii=False, indent=2)
+    # print(f'Gerado localmente: {arquivo_saida} ({len(lista_empresas_json)} empresas)')
 
     print('Silver -> Gold concluído.')
 

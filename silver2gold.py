@@ -56,7 +56,7 @@ def carregar_config():
         'silver': os.getenv('S3_SILVER_PREFIX', '02-silver/').strip('/') + '/',
         'gold': os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/',
         'fuso': ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo')),
-        'offline_timeout': int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '900')),
+        'offline_timeout': int(os.getenv('OFFLINE_TIMEOUT_SECONDS', '2400')),
         'frequencia': int(os.getenv('FREQUENCIA_ESPERADA_SEGUNDOS', '60')),
         'dias_historico': 40,
         'dias_serie': 30,

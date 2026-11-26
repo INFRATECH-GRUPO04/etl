@@ -72,7 +72,7 @@ def carregar_config():
 
 
 def obter_cliente_s3():
-    regiao = os.getenv('AWS_REGION')
+    regiao = os.getenv('AWS_REGION') or os.getenv('AWS_DEFAULT_REGION')
     return boto3.client('s3', region_name=regiao) if regiao else boto3.client('s3')
 
 

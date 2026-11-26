@@ -1,6 +1,9 @@
 # ETL Bronze -> Silver -> Gold
 
-Requer Python 3 e `boto3`. Na EC2, o boto3 usa a IAM Role.
+Requer Python 3 e `boto3`. O boto3 usa a cadeia padrão de credenciais: na EC2/Lambda, a IAM Role;
+localmente, `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (ou `AWS_PROFILE`) do `.env`. Sem nada
+preenchido, a role é assumida — não precisa de `if` no código. `AWS_REGION` (ou
+`AWS_DEFAULT_REGION`) define a região; o padrão é `us-east-1`.
 
 1. Configure `.env` a partir de `.env.example` e preencha `S3_BUCKET`.
 2. Execute `python bronze2silver.py`.
@@ -63,4 +66,75 @@ Para testar a escrita do gold em um bucket pessoal, defina `S3_GOLD_BUCKET` no `
 
 Execute `silver2gold.py` periodicamente para atualizar a `conexao` de servidores que parem de enviar dados.
 
-O acesso ao S3 usa a cadeia padrão de credenciais do `boto3`: perfil local (`AWS_PROFILE`) no teste ou IAM Role na Lambda/EC2. A Lambda precisa de `s3:ListBucket` no bucket, `s3:GetObject` em `02-silver/metricas/*` e `02-silver/processos/*`, e `s3:PutObject` em `03-gold/*`.
+O acesso ao S3 usa a cadeia padrão de credenciais do `boto3`: variáveis de ambiente, perfil local
+(`AWS_PROFILE`) ou IAM Role na Lambda/EC2. Preencha o par completo
+(`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, e `AWS_SESSION_TOKEN` se for temporário) ou use
+`AWS_PROFILE` com os arquivos compartilhados; deixar tudo comentado significa "usar a role". A
+Lambda precisa de `s3:ListBucket` no bucket, `s3:GetObject` em `02-silver/metricas/*` e
+`02-silver/processos/*`, e `s3:PutObject` em `03-gold/*`. As variáveis das Lambdas ficam na
+configuração da AWS — o `.env` da EC2 não as altera.
+
+## Deploy na AWS Lambda
+
+Checklist das duas funções:
+
+| Item | `bronze2silver` | `silver2gold` |
+|---|---|---|
+| Runtime | Python 3.11 | Python 3.11 (necessário por `zoneinfo`) |
+| Handler | `bronze2silver.lambda_handler` | `silver2gold.lambda_handler` |
+| Gatilho | evento do S3 em `01-bronze/` ou EventBridge a cada 10 min | EventBridge a cada 30 min |
+| Timeout sugerido | 120–300 s | 300–600 s |
+| Memória sugerida | 512 MB | 512–1024 MB |
+
+As duas funções expõem `lambda_handler(evento, contexto)`; os dois arquivos também podem ser
+executados diretamente com `python <arquivo>.py` para testes locais. O `boto3` já vem no runtime
+da Lambda, então não precisa entrar no pacote. **Não inclua o `.env` no zip**: as variáveis da
+Lambda são injetadas no ambiente e o `setdefault` dos scripts dá precedência a elas.
+
+Variáveis na configuração da função:
+
+- `S3_BUCKET` — obrigatória nas duas; sem ela, `run()` falha com erro explícito.
+- `S3_BRONZE_PREFIX`, `S3_SILVER_PREFIX`, `S3_GOLD_PREFIX` — opcionais (padrões `01-bronze/`, `02-silver/`, `03-gold/`).
+- `TIMEZONE`, `OFFLINE_TIMEOUT_SECONDS`, `FREQUENCIA_ESPERADA_SEGUNDOS`, `LIMITE_*_PCT`, `REDE_MAX_INTERVAL_SECONDS`, `LARGURA_BANDA_MBPS`, `PLANEJAMENTO_JANELA_DIAS`, `GOLD_RETENTION_DAYS`, `S3_GOLD_BUCKET` — opcionais, usadas pelo silver2gold.
+- `AWS_REGION` é injetado automaticamente pela Lambda; `AWS_DEFAULT_REGION` é aceito como fallback. Não preencha credenciais AWS quando a função já tem IAM Role.
+
+Política IAM mínima da role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::NOME_DO_BUCKET"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::NOME_DO_BUCKET/01-bronze/*",
+        "arn:aws:s3:::NOME_DO_BUCKET/02-silver/metricas/*",
+        "arn:aws:s3:::NOME_DO_BUCKET/02-silver/processos/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::NOME_DO_BUCKET/02-silver/*",
+        "arn:aws:s3:::NOME_DO_BUCKET/03-gold/*"
+      ]
+    }
+  ]
+}
+```
+
+`ListBucket` é necessário não só para a paginação, mas para o `ler_manifesto()` do silver2gold
+conseguir distinguir `404` (chave ausente, normal) de `403` (permissão faltando). Não é preciso
+`s3:DeleteObject`: a retenção de 180 dias apenas filtra a entrada, nunca apaga objetos do gold.
+
+O bronze não usa watermark e reprocessa todo o prefixo `01-bronze/` a cada invocação, sobrescrevendo
+as chaves da silver; isso está de acordo com o contrato atual. O dia gravado na partição `data=` vem
+sempre dos 8 primeiros caracteres do lote no nome do arquivo, inclusive para lotes que cruzam
+meia-noite.

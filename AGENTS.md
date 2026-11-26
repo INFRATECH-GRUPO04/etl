@@ -84,7 +84,7 @@ Reduzir o tempo para detectar e diagnosticar falhas, com dashboards por persona,
 - Front é plano (`public/html|css|js`) mas as URLs são aninhadas; o middleware de `app.js` resolve pelo nome do arquivo. Não mova nem duplique nomes.
 - `public/js/permissoes.js` é a única fonte das regras de acesso (usada também no back-end).
 - Sessão: cookie HMAC `infratech_session` (12 h). Sem `AUTH_TOKEN_SECRET`, restart desloga todos.
-- Schema: fonte da verdade é `src/database/infratech-atualizado.sql`; não altere schema sem alinhar. Atenção: o código usa a tabela `limite_alerta_global`, que só existe em `SCRIPT-INFRATECH.sql`.
+- Schema: fonte da verdade é `src/database/infratech-init.sql`; não altere schema sem alinhar. Atenção: o código usa a tabela `limite_alerta_global`, que só existe em `SCRIPT-INFRATECH.sql`.
 - O back-end lê `03-gold/empresa-{id}/dash-geral.json`; a seção 9 descreve quem grava esse arquivo.
 
 **ETL:** duas Lambdas Python (bronze→silver, silver→gold), prefixos `01-bronze`, `02-silver`, `03-gold`. A bronze→silver promove `_dados.csv` para `02-silver/metricas/` e `_processos.csv` para `02-silver/processos/`, sem `latest.json`, sem watermark e sem mudança nos formatos dos CSVs. A silver→gold roda a cada 30 min, usa janela de 40 dias e grava `03-gold/empresa-{id}/dash-*.json` (seis arquivos por empresa, inclusive `dash-geral.json`, que o site lê; não `dashboard.json`).

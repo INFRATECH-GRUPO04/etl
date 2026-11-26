@@ -53,7 +53,7 @@ O primeiro script trata somente arquivos `_dados.csv`. A Silver é separada por 
 }
 ```
 
-A ETL calcula apenas o que depende das capturas: frescor (`conexao`/`ultima_leitura`), leituras atuais e disponibilidade da frota em 7d/30d. `situacao`, agregados de saúde, incidentes e relatório de IA não entram no gold: a classificação pelos limites do MySQL e as rotas complementares ficam no backend do site.
+A ETL calcula apenas o que depende das capturas: frescor (`conexao`/`ultima_leitura`), leituras atuais e disponibilidade da frota em 7d/30d. `situacao`, agregados de saúde e incidentes não entram no gold: a classificação pelos limites do MySQL e a rota complementar de incidentes ficam no backend do site.
 
 A disponibilidade usa **dias de calendário** no fuso de `TIMEZONE`: 7 pontos em `7d` e 30 em `30d`, sempre rotulados `dd/mm` (o `7d` é o recorte dos últimos 7 pontos do `30d`). O dia de hoje é proporcional até o `gerado_em`. Por servidor, o esperado é o tempo monitorado dividido por `FREQUENCIA_ESPERADA_SEGUNDOS`; a frota de cada dia é **ponderada** por capturas recebidas ÷ esperadas (não é média simples dos percentuais). Antes da primeira captura do servidor o ponto é `null`; depois que ele já era monitorado e não enviou nada no dia, o ponto é `0`.
 

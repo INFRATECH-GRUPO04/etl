@@ -6,9 +6,9 @@ Requer Python 3 e `boto3`. Na EC2, o boto3 usa a IAM Role.
 2. Execute `python bronze2silver.py`.
 3. Execute `python silver2gold.py`.
 
-O Bronze é lido de `01-bronze/`, a Silver é gravada em `02-silver/metricas/` e a Gold em `03-gold/empresa-{id}/dash-geral.json`. Não existe `latest.json` em nenhum prefixo.
+O Bronze é lido de `01-bronze/`, a Silver é gravada em `02-silver/metricas/` (`_dados.csv`) e `02-silver/processos/` (`_processos.csv`), e a Gold em `03-gold/empresa-{id}/dash-*.json`. Não existe `latest.json` em nenhum prefixo.
 
-O primeiro script trata somente arquivos `_dados.csv`. A Silver é separada por empresa, servidor e data. O segundo lê apenas as partições `data=AAAA-MM-DD` dos últimos **40 dias** — o filtro é aplicado pela chave, antes de baixar o objeto — e grava, por empresa, o contrato `versao: 2` consumido pelo backend do site:
+O primeiro script trata arquivos `_dados.csv` e `_processos.csv`, separados por empresa, servidor e data. O segundo lê apenas as partições `data=AAAA-MM-DD` dos últimos **40 dias** — o filtro é aplicado pela chave, antes de baixar o objeto — e grava, por empresa, seis arquivos principais: `dash-geral.json` (gestor), `dash-noc.json`, `dash-capacidade.json`, `dash-investigacao.json`, `dash-metricas.json` e `dash-operacional.json`, além das partições históricas em `dash-investigacao-historico/` e `dash-metricas/`. O `dash-geral.json` mantém o contrato `versao: 2` consumido pelo backend do site:
 
 ```json
 {
@@ -63,4 +63,4 @@ Para testar a escrita do gold em um bucket pessoal, defina `S3_GOLD_BUCKET` no `
 
 Execute `silver2gold.py` periodicamente para atualizar a `conexao` de servidores que parem de enviar dados.
 
-O acesso ao S3 usa a cadeia padrão de credenciais do `boto3`: perfil local (`AWS_PROFILE`) no teste ou IAM Role na Lambda/EC2. A Lambda precisa de `s3:ListBucket` no bucket, `s3:GetObject` em `02-silver/metricas/*` e `s3:PutObject` em `03-gold/*`.
+O acesso ao S3 usa a cadeia padrão de credenciais do `boto3`: perfil local (`AWS_PROFILE`) no teste ou IAM Role na Lambda/EC2. A Lambda precisa de `s3:ListBucket` no bucket, `s3:GetObject` em `02-silver/metricas/*` e `02-silver/processos/*`, e `s3:PutObject` em `03-gold/*`.

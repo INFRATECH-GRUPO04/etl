@@ -87,7 +87,7 @@ Reduzir o tempo para detectar e diagnosticar falhas, com dashboards por persona,
 - Schema: fonte da verdade é `src/database/infratech-atualizado.sql`; não altere schema sem alinhar. Atenção: o código usa a tabela `limite_alerta_global`, que só existe em `SCRIPT-INFRATECH.sql`.
 - O back-end lê `03-gold/empresa-{id}/dash-geral.json`; a seção 9 descreve quem grava esse arquivo.
 
-**ETL:** duas Lambdas Python (bronze→silver, silver→gold), prefixos `01-bronze`, `02-silver`, `03-gold`. A bronze→silver fica como está: sem `latest.json`, sem watermark e sem mudança de formato. A silver→gold roda a cada 30 min, usa janela de 40 dias e grava `03-gold/empresa-{id}/dash-geral.json` (nome que o site lê; não `dashboard.json`).
+**ETL:** duas Lambdas Python (bronze→silver, silver→gold), prefixos `01-bronze`, `02-silver`, `03-gold`. A bronze→silver promove `_dados.csv` para `02-silver/metricas/` e `_processos.csv` para `02-silver/processos/`, sem `latest.json`, sem watermark e sem mudança nos formatos dos CSVs. A silver→gold roda a cada 30 min, usa janela de 40 dias e grava `03-gold/empresa-{id}/dash-*.json` (seis arquivos por empresa, inclusive `dash-geral.json`, que o site lê; não `dashboard.json`).
 
 **Logs/Java:** `mvn -q package` gera o jar executável; `Dockerfile` + `.env.example` para rodar local/EC2. O Java lê `02-silver/metricas/` com `S3_SILVER_PREFIX` (não usa mais `S3_ALERTA_PREFIX`) e precisa de `s3:ListBucket` na silver além de `GetObject`. Config fora do repo em `~/.config/infratech/alertas.env`. Não há testes/lint/CI: validar manualmente.
 
@@ -99,9 +99,9 @@ Vale para os 4 repositórios. Se o código divergir, **o código atual vence**; 
 
 **Coleta (script_python):** 1 captura por minuto, lote de 10 capturas enviado a cada 10 min via `POST /agente/enviar`. Cabeçalho fixo e IDs de empresa/servidor no nome do arquivo e dentro do CSV. `bytes_enviados`/`bytes_recebidos` são cumulativos — a conversão para Mbps é feita depois, pelo Java.
 
-**Bronze → silver (ETL):** inalterado. Chaves `02-silver/metricas/empresa_id={id}/servidor_id={id}/data=AAAA-MM-DD/<lote>_empresa-{id}_servidor-{id}_dados.csv`. Um lote que cruza meia-noite gera dois arquivos com o mesmo `lote`. **Não gerar `latest.json` em lugar nenhum.**
+**Bronze → silver (ETL):** formato dos CSVs inalterado. Métricas em `02-silver/metricas/empresa_id={id}/servidor_id={id}/data=AAAA-MM-DD/<lote>_empresa-{id}_servidor-{id}_dados.csv` e processos em `02-silver/processos/empresa_id={id}/servidor_id={id}/data=AAAA-MM-DD/<lote>_empresa-{id}_servidor-{id}_processos.csv` (o dia vem do `YYYYMMDD` do lote, gerado em Brasília). Um lote que cruza meia-noite gera dois arquivos com o mesmo `lote`. **Não gerar `latest.json` em lugar nenhum.**
 
-**Silver → gold (ETL):** execução a cada 30 min; janela máxima de 40 dias; filtrar a chave `data=` antes de baixar/parsear para não reprocessar tudo; gravar `03-gold/empresa-{id}/dash-geral.json`.
+**Silver → gold (ETL):** execução a cada 30 min; janela máxima de 40 dias; filtrar a chave `data=` antes de baixar/parsear para não reprocessar tudo; gravar, por empresa, `dash-geral.json`, `dash-noc.json`, `dash-capacidade.json`, `dash-investigacao.json`, `dash-metricas.json` e `dash-operacional.json` em `03-gold/empresa-{id}/`, mais as partições em `dash-investigacao-historico/` e `dash-metricas/`. O `dash-geral.json` continua sendo o contrato lido pelo site.
 
 **Java de alertas (logs):** lê os CSVs da silver diretamente. Usa `S3_SILVER_PREFIX` (default `02-silver/metricas/`); listagem paginada; filtra `_dados.csv` das partições de hoje/ontem; monta as amostras com parser manual (`split(",", -1)` + índice do cabeçalho, sem dependência nova). Watermark **por `(empresa, servidor)`**, usando o `lote` do nome do arquivo (interpretado como Brasília, não UTC); sem lote novo, não faz GET. Agrupa os dois arquivos de um mesmo lote quando ele cruza meia-noite. Para a rede, lê também o lote anterior do servidor e calcula `Mbps = (bytes[t] - bytes[t-1]) / Δt * 8 / 1e6`, com `Δt` real dos `data_hora` e delta negativo tratado como 0.
 

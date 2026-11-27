@@ -53,6 +53,7 @@ def carregar_config():
 
     return {
         'bucket': bucket,
+        'gold_bucket': os.getenv('S3_GOLD_BUCKET') or bucket,
         'silver': os.getenv('S3_SILVER_PREFIX', '02-silver/').strip('/') + '/',
         'gold': os.getenv('S3_GOLD_PREFIX', '03-gold/').strip('/') + '/',
         'fuso': ZoneInfo(os.getenv('TIMEZONE', 'America/Sao_Paulo')),
@@ -65,7 +66,11 @@ def carregar_config():
             for campo in ('cpu', 'ram', 'disco')
         },
         'rede_timeout': int(os.getenv('REDE_MAX_INTERVAL_SECONDS', '90')),
+        'rede_sarah_timeout': int(os.getenv('REDE_SARAH_MAX_INTERVAL_SECONDS', '180')),
+        'rede_timeout_qa': int(os.getenv('REDE_QA_MAX_INTERVAL_SECONDS', '120')),
         'banda_mbps': float(os.getenv('LARGURA_BANDA_MBPS', '1000')),
+        'capacidade_rede_mbps': float(os.getenv('CAPACIDADE_REDE_MBPS', '100')),
+        'limite_critico_cpu': float(os.getenv('LIMITE_CRITICO_CPU_PCT', '90')),
         'janela_capacidade_dias': int(os.getenv('PLANEJAMENTO_JANELA_DIAS', '30')),
         'retencao_historico_dias': int(os.getenv('GOLD_RETENTION_DAYS', '180')),
     }
@@ -97,6 +102,18 @@ def ler_csv_s3(s3, bucket, chave):
 # Leitura da Silver (uma única vez, compartilhada por todas as saídas)
 # ---------------------------------------------------------------------------
 
+def numero_opcional(linha, chave):
+    """Converte uma coluna opcional do CSV; vazia ou inválida vira None."""
+    texto = str(linha.get(chave) or '').strip()
+    if not texto:
+        return None
+    try:
+        valor = float(texto)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return valor if math.isfinite(valor) else None
+
+
 def processar_linha(linha, cfg, arquivo):
     """Normaliza uma captura de _dados.csv; retorna None para linhas inválidas."""
     try:
@@ -118,6 +135,19 @@ def processar_linha(linha, cfg, arquivo):
 
     if not all(math.isfinite(valor) for valor in valores.values()):
         return None
+
+    # Colunas extras usadas pelo dash-qa. Uma coluna ausente não invalida a captura.
+    valores.update({
+        '_ram_total': numero_opcional(linha, 'ram_total'),
+        '_ram_disponivel': numero_opcional(linha, 'ram_disponivel'),
+        '_disco_total': numero_opcional(linha, 'disco_total'),
+        '_disco_disponivel': numero_opcional(linha, 'disco_disponivel'),
+        '_trocas_contexto': numero_opcional(linha, 'trocas_contexto'),
+        '_tempo_escrita_disco': numero_opcional(linha, 'tempo_escrita_disco'),
+        '_temperatura_cpu': numero_opcional(linha, 'temperatura_cpu'),
+        '_bytes_enviados': numero_opcional(linha, 'bytes_enviados'),
+        '_bytes_recebidos': numero_opcional(linha, 'bytes_recebidos'),
+    })
 
     linha = dict(linha)
     linha.update(valores)
@@ -558,7 +588,7 @@ def ler_manifesto(s3, bucket, chave):
 
 
 def publicar_particoes_investigacao(s3, bucket, raiz, empresa, id_servidor, amostras, taxas, cfg):
-    """Grava uma partição por servidor/dia e devolve só os ponteiros."""
+    """Publica as partições separadas e devolve o histórico consolidado da Claudia."""
     dias = defaultdict(list)
     for amostra in amostras:
         if not captura_historica_valida(amostra):
@@ -581,6 +611,7 @@ def publicar_particoes_investigacao(s3, bucket, raiz, empresa, id_servidor, amos
         })
 
     particoes = []
+    particoes_historicas = []
     for dia, capturas in sorted(dias.items()):
         chave = f'{raiz}servidor_id={id_servidor}/data={dia}.json'
         manifesto = f'{raiz}metadados_particao/{hashlib.sha256(f"{id_servidor}:{dia}".encode()).hexdigest()}.json'
@@ -593,19 +624,36 @@ def publicar_particoes_investigacao(s3, bucket, raiz, empresa, id_servidor, amos
         assinatura = hashlib.sha256(
             json.dumps(documento, ensure_ascii=False, allow_nan=False, sort_keys=True).encode('utf-8')
         ).hexdigest()
+        manifesto_documento = {
+            **identificacao,
+            'etag_origem': assinatura,
+            'chave_historico': chave,
+            **resumo_coleta([
+                datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
+                for item in capturas
+            ], cfg['frequencia']),
+        }
 
         if ler_manifesto(s3, bucket, manifesto).get('etag_origem') != assinatura:
             gravar_json(s3, bucket, chave, documento)
-            gravar_json(s3, bucket, manifesto, {
-                **identificacao,
-                'etag_origem': assinatura,
-                'chave_historico': chave,
-                **resumo_coleta([
-                    datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00'))
-                    for item in capturas
-                ], cfg['frequencia']),
-            })
+            gravar_json(s3, bucket, manifesto, manifesto_documento)
+
+        # O front valida empresa/servidor em cada captura antes de aceitar a partição.
+        if any(
+            captura['id_empresa'] != documento['id_empresa']
+            or captura['id_servidor'] != documento['id_servidor']
+            for captura in capturas
+        ):
+            raise ValueError('Os IDs das capturas não correspondem à partição histórica.')
+
         particoes.append(chave)
+        particoes_historicas.append({
+            'documento': {
+                **{campo: valor for campo, valor in documento.items() if campo != 'capturas'},
+                'capturas': [[captura[campo] for campo in CAMPOS_CAPTURA] for captura in capturas],
+            },
+            'manifesto': manifesto_documento,
+        })
 
     capturas_validas = [amostra for amostra in amostras if captura_historica_valida(amostra)]
     if not capturas_validas:
@@ -615,6 +663,7 @@ def publicar_particoes_investigacao(s3, bucket, raiz, empresa, id_servidor, amos
     return {
         'id_servidor': id_servidor,
         'particoes': particoes,
+        'particoes_historicas': particoes_historicas,
         'primeira_captura': datas[0].isoformat(timespec='microseconds').replace('+00:00', 'Z'),
         'ultima_captura': datas[-1].isoformat(timespec='microseconds').replace('+00:00', 'Z'),
         'frequencia_esperada_segundos': cfg['frequencia'],
@@ -623,9 +672,11 @@ def publicar_particoes_investigacao(s3, bucket, raiz, empresa, id_servidor, amos
 
 
 def construir_dash_investigacao(s3, empresa, listas, agora, cfg):
+    """Contrato da Claudia: operacional + histórico embutido, em dash-investigacao.json."""
     raiz = f"{cfg['gold']}empresa-{empresa}/dash-investigacao-historico/"
     limite = agora - timedelta(days=cfg['retencao_historico_dias'])
     historicos = []
+    particoes_historicas = []
 
     for id_servidor, lista in sorted(listas.items()):
         amostras_historicas = [
@@ -634,9 +685,10 @@ def construir_dash_investigacao(s3, empresa, listas, agora, cfg):
         ]
         taxas = calcular_taxas_rede(lista, cfg)
         resumo = publicar_particoes_investigacao(
-            s3, cfg['bucket'], raiz, empresa, id_servidor, amostras_historicas, taxas, cfg
+            s3, cfg['gold_bucket'], raiz, empresa, id_servidor, amostras_historicas, taxas, cfg
         )
         if resumo:
+            particoes_historicas.extend(resumo.pop('particoes_historicas'))
             historicos.append(resumo)
 
     historicos.sort(key=lambda item: item['id_servidor'])
@@ -646,21 +698,19 @@ def construir_dash_investigacao(s3, empresa, listas, agora, cfg):
         'primeira_captura': min((item['primeira_captura'] for item in historicos), default=None),
         'ultima_captura': max((item['ultima_captura'] for item in historicos), default=None),
         'capturas_validas': sum(item['capturas_validas'] for item in historicos),
-        'servidores': [
-            {chave: valor for chave, valor in item.items() if chave != 'particoes'}
-            for item in historicos
-        ],
+        'servidores': historicos,
     }
+    operacional = construir_dash_operacional(empresa, listas, agora, cfg)
 
     return {
-        'versao': 1,
         'id_empresa': empresa,
-        'gerado_em': agora.astimezone(cfg['fuso']).isoformat(),
-        'colunas_captura': CAMPOS_CAPTURA,
+        'gerado_em': agora.isoformat(),
+        'kpis': operacional['kpis'],
+        'servidores': operacional['servidores'],
         'historico': {
             'metadados': metadados,
-            'layout': 'dash-investigacao-historico/servidor_id={id_servidor}/data={data}.json',
-            'particoes': [chave for item in historicos for chave in item['particoes']],
+            'colunas_captura': CAMPOS_CAPTURA,
+            'particoes_historicas': particoes_historicas,
         },
     }
 
@@ -669,18 +719,29 @@ def construir_dash_investigacao(s3, empresa, listas, agora, cfg):
 # dash-metricas.json + partições diárias de métricas
 # ---------------------------------------------------------------------------
 
+def rede_percentual_sarah(atual, anterior, cfg):
+    """Percentual da banda entre duas capturas, com a tolerância da Sarah."""
+    if anterior is None or cfg['banda_mbps'] <= 0:
+        return None
+    try:
+        segundos = (atual['_data'] - anterior['_data']).total_seconds()
+        enviados = int(atual['bytes_enviados']) - int(anterior['bytes_enviados'])
+        recebidos = int(atual['bytes_recebidos']) - int(anterior['bytes_recebidos'])
+    except (KeyError, ValueError, TypeError, OverflowError):
+        return None
+    if not 0 < segundos <= cfg['rede_sarah_timeout'] or enviados < 0 or recebidos < 0:
+        return None
+    mbps = (enviados + recebidos) * 8 / segundos / 1_000_000
+    return round(min(100.0, mbps / cfg['banda_mbps'] * 100), 1)
+
+
 def publicar_particoes_metricas(s3, bucket, raiz, empresa, id_servidor, lista, agora, cfg):
     """Replica as métricas agregadas da Sarah em arquivos por servidor/dia."""
-    taxas = calcular_taxas_rede(lista, cfg)
     pontos = []
     origens = []
 
     for indice, amostra in enumerate(lista):
-        upload, download = taxas.get(amostra['_data'], (None, None))
-        rede = None
-        if upload is not None and cfg['banda_mbps'] > 0:
-            rede = round(min(100.0, (upload + download) / cfg['banda_mbps'] * 100), 1)
-
+        rede = rede_percentual_sarah(amostra, lista[indice - 1], cfg) if indice else None
         ponto = {
             'dataHora': amostra['_data'].astimezone(cfg['fuso']).strftime('%Y-%m-%d %H:%M:%S'),
             'cpu': amostra['_cpu'],
@@ -722,7 +783,7 @@ def publicar_particoes_metricas(s3, bucket, raiz, empresa, id_servidor, lista, a
                 'capturas': capturas,
             })
 
-        chave = f'{raiz}servidor_id={id_servidor}/data={dia}.json'
+        chave = f'{raiz}servidor_id={id_servidor}/data={dia}/dash-metricas.json'
         gravar_json(s3, bucket, chave, {
             'id_empresa': empresa,
             'id_servidor': id_servidor,
@@ -749,12 +810,12 @@ def publicar_particoes_metricas(s3, bucket, raiz, empresa, id_servidor, lista, a
 
 
 def construir_dash_metricas(s3, empresa, listas, agora, cfg):
-    raiz = f"{cfg['gold']}empresa-{empresa}/dash-metricas/"
+    raiz = f"{cfg['gold']}metricas/empresa_id={empresa}/"
     servidores = []
 
     for id_servidor, lista in sorted(listas.items()):
         resumo = publicar_particoes_metricas(
-            s3, cfg['bucket'], raiz, empresa, id_servidor, lista, agora, cfg
+            s3, cfg['gold_bucket'], raiz, empresa, id_servidor, lista, agora, cfg
         )
         if resumo:
             servidores.append(resumo)
@@ -763,8 +824,239 @@ def construir_dash_metricas(s3, empresa, listas, agora, cfg):
         'versao': 1,
         'id_empresa': empresa,
         'gerado_em': agora.isoformat(),
-        'layout': 'dash-metricas/servidor_id={id_servidor}/data={data}.json',
+        'layout': 'metricas/empresa_id={id_empresa}/servidor_id={id_servidor}/data={data}/dash-metricas.json',
         'servidores': servidores,
+    }
+
+
+# ---------------------------------------------------------------------------
+# dash-qa.json — contrato do Felipe, gravado por empresa
+# ---------------------------------------------------------------------------
+
+def calcular_p95(valores):
+    """P95 das últimas 24 h na mesma regra da branch do Felipe."""
+    validos = sorted(valor for valor in valores if valor is not None)
+    if not validos:
+        return 0.0
+    indice = min(int(len(validos) * 0.95), len(validos) - 1)
+    return round(validos[indice], 1)
+
+
+def calcular_eficiencia_termica(temp_c, temp_ideal=35.0, temp_critica=95.0):
+    if temp_c is None:
+        return None
+    eficiencia = 100.0 - ((temp_c - temp_ideal) / (temp_critica - temp_ideal) * 100.0)
+    return round(max(0.0, min(100.0, eficiencia)), 1)
+
+
+def ram_usada_gb(amostra):
+    total = amostra.get('_ram_total')
+    disponivel = amostra.get('_ram_disponivel')
+    if total is None or disponivel is None:
+        return None
+    return total - disponivel
+
+
+def disco_usado_mb(amostra):
+    total = amostra.get('_disco_total')
+    disponivel = amostra.get('_disco_disponivel')
+    if total is None or disponivel is None:
+        return None
+    return (total - disponivel) * 1024
+
+
+def delta_opcional(atual, anterior, chave):
+    primeiro = atual.get(chave)
+    segundo = anterior.get(chave)
+    if primeiro is None or segundo is None:
+        return None
+    return primeiro - segundo
+
+
+def arredondar_ou_nulo(valor, casas):
+    return round(valor, casas) if valor is not None else None
+
+
+def rede_qa_mbps(atual, anterior, cfg):
+    """Mbps da soma dos contadores, com o timeout específico do QA."""
+    if anterior is None:
+        return 0.0
+    enviados = delta_opcional(atual, anterior, '_bytes_enviados')
+    recebidos = delta_opcional(atual, anterior, '_bytes_recebidos')
+    if enviados is None or recebidos is None:
+        return 0.0
+    segundos = (atual['_data'] - anterior['_data']).total_seconds()
+    if not 0 < segundos <= cfg['rede_timeout_qa'] or enviados < 0 or recebidos < 0:
+        return 0.0
+    return (enviados + recebidos) * 8 / segundos / 1_000_000
+
+
+def gerar_projecao_escalabilidade(jogadores_atuais, cpu_atual, ram_atual_gb,
+                                  rede_atual_mbps, cfg):
+    """Custo por jogador e projeção de 11 pontos até o limite crítico de CPU."""
+    jogadores = max(1, jogadores_atuais)
+    custo_cpu = max(0.01, cpu_atual / jogadores)
+    custo_ram = max(0.001, (ram_atual_gb or 0.0) / jogadores)
+    custo_rede = max(0.001, (rede_atual_mbps or 0.0) / jogadores)
+
+    max_jogadores = int(cfg['limite_critico_cpu'] / custo_cpu)
+    alvo = max(max_jogadores * 1.15, 20)
+    magnitude = 10 ** (len(str(int(alvo))) - 1)
+    passo_base = magnitude / 2 if alvo / magnitude <= 5 else magnitude
+    teto_grafico = int(math.ceil(alvo / passo_base) * passo_base)
+    passo = max(1, teto_grafico // 10)
+
+    projecao = []
+    for quantidade in range(0, teto_grafico + 1, passo):
+        projecao.append({
+            'jogadores': quantidade,
+            'cpu_pct': round(min(100.0, custo_cpu * quantidade), 1),
+            'ram_gb': round(custo_ram * quantidade, 2),
+            'rede_mbps': round(custo_rede * quantidade, 2),
+        })
+
+    return {
+        'max_jogadores_suportados': max_jogadores,
+        'consumo_unitario_por_jogador': {
+            'cpu_pct': round(custo_cpu, 2),
+            'ram_gb': round(custo_ram, 3),
+            'rede_mbps': round(custo_rede, 3),
+        },
+        'projecao': projecao,
+    }
+
+
+def construir_dash_qa(empresa, listas, agora, cfg):
+    inicio = agora - timedelta(hours=24)
+    servidores = []
+
+    for id_servidor, lista in sorted(listas.items()):
+        ultima = lista[-1]
+        penultima = lista[-2] if len(lista) >= 2 else None
+        primeira_lote = lista[-10] if len(lista) >= 10 else lista[0]
+
+        pontos_30min = {}
+        hist_cpu, hist_ram, hist_disco = [], [], []
+        hist_rede, hist_temp = [], []
+        anterior = None
+        rede_atual_mbps = 0.0
+
+        for amostra in lista:
+            rede_mbps = rede_qa_mbps(amostra, anterior, cfg)
+            if inicio <= amostra['_data'] <= agora:
+                hist_cpu.append(amostra['_cpu'])
+                hist_ram.append(amostra['_ram'])
+                hist_disco.append(amostra['_disco'])
+                hist_temp.append(amostra.get('_temperatura_cpu'))
+                if anterior is not None:
+                    hist_rede.append(rede_mbps)
+
+                local = amostra['_data'].astimezone(cfg['fuso'])
+                bloco = local.replace(
+                    minute=0 if local.minute < 30 else 30,
+                    second=0,
+                    microsecond=0,
+                )
+                pontos_30min[bloco] = {
+                    'cpu_pct': round(amostra['_cpu'], 1),
+                    'ram_gb': arredondar_ou_nulo(ram_usada_gb(amostra), 2),
+                    'disco_mb': arredondar_ou_nulo(disco_usado_mb(amostra), 1),
+                    'rede_mbps': arredondar_ou_nulo(rede_mbps, 2),
+                }
+
+            anterior = amostra
+            rede_atual_mbps = rede_mbps
+
+        atraso = (agora - ultima['_data']).total_seconds()
+        status = 'offline' if atraso > cfg['offline_timeout'] else 'online'
+        jogadores_atuais = max(1, int(ultima['_cpu'] / 0.85))
+
+        ram_agora = ram_usada_gb(ultima)
+        ram_antes = ram_usada_gb(primeira_lote)
+        minutos = (ultima['_data'] - primeira_lote['_data']).total_seconds() / 60
+        if ram_agora is not None and ram_antes is not None and minutos > 0:
+            crescimento_ram = round(((ram_agora - ram_antes) * 1024 / minutos) * 60, 1)
+        else:
+            crescimento_ram = 0.0
+
+        if penultima:
+            segundos = max(1.0, (ultima['_data'] - penultima['_data']).total_seconds())
+            trocas = delta_opcional(ultima, penultima, '_trocas_contexto')
+            fila = delta_opcional(ultima, penultima, '_tempo_escrita_disco')
+            enviados = delta_opcional(ultima, penultima, '_bytes_enviados')
+            recebidos = delta_opcional(ultima, penultima, '_bytes_recebidos')
+            trocas_s = int(max(0, trocas) / segundos) if trocas is not None else 0
+            fila_ms = int(max(0, fila)) if fila is not None else 0
+            if enviados is not None and recebidos is not None:
+                bytes_totais = max(0, enviados + recebidos)
+                bytes_por_jogador = round((bytes_totais / segundos) / jogadores_atuais, 1)
+            else:
+                bytes_por_jogador = 0.0
+        else:
+            trocas_s = fila_ms = 0
+            bytes_por_jogador = 0.0
+
+        serie_cpu, serie_ram, serie_disco, serie_rede = [], [], [], []
+        for bloco, valores in sorted(pontos_30min.items()):
+            horario = bloco.strftime('%Y-%m-%d %H:%M')
+            serie_cpu.append({'horario': horario, 'valor': valores['cpu_pct']})
+            serie_ram.append({'horario': horario, 'valor': valores['ram_gb']})
+            serie_disco.append({'horario': horario, 'valor': valores['disco_mb']})
+            serie_rede.append({'horario': horario, 'valor': valores['rede_mbps']})
+
+        escalabilidade = gerar_projecao_escalabilidade(
+            jogadores_atuais,
+            ultima['_cpu'],
+            arredondar_ou_nulo(ram_usada_gb(ultima), 2),
+            rede_atual_mbps,
+            cfg,
+        )
+
+        rede_p95 = calcular_p95(hist_rede)
+        if cfg['capacidade_rede_mbps'] > 0:
+            rede_p95_pct = round(
+                min(100.0, rede_p95 / cfg['capacidade_rede_mbps'] * 100.0), 1
+            )
+        else:
+            rede_p95_pct = None
+        temp_p95 = calcular_p95(hist_temp) if any(v is not None for v in hist_temp) else None
+
+        servidores.append({
+            'id_servidor': id_servidor,
+            'nome': ultima.get('username') or f'Servidor {id_servidor}',
+            'status': status,
+            'ultima_coleta': ultima['data_hora'],
+            'jogadores_atuais': jogadores_atuais,
+            'kpis': {
+                'indice_crescimento_memoria': {'valor_mb_h': crescimento_ram},
+                'taxa_troca_contexto': {'valor_trocas_s': trocas_s},
+                'tempo_fila_disco': {'valor_ms': fila_ms},
+                'eficiencia_payload': {'valor_bytes_s_jogador': bytes_por_jogador},
+            },
+            'graficos': {
+                'consumo_recursos_24h': {
+                    'cpu_pct': serie_cpu,
+                    'ram_gb': serie_ram,
+                    'disco_mb': serie_disco,
+                    'rede_mbps': serie_rede,
+                },
+                'escalabilidade_jogadores': escalabilidade,
+                'assinatura_performance': {
+                    'janela_analise': '24h_p95',
+                    'eixos': [
+                        {'componente': 'RAM', 'valor_pct': calcular_p95(hist_ram)},
+                        {'componente': 'CPU', 'valor_pct': calcular_p95(hist_cpu)},
+                        {'componente': 'Disco', 'valor_pct': calcular_p95(hist_disco)},
+                        {'componente': 'Rede', 'valor_pct': rede_p95_pct},
+                        {'componente': 'Eficiência térmica', 'valor_pct': calcular_eficiencia_termica(temp_p95)},
+                    ],
+                },
+            },
+        })
+
+    return {
+        'gerado_em': agora.isoformat(),
+        'empresas': [{'id_empresa': empresa, 'servidores': servidores}],
     }
 
 
@@ -793,11 +1085,12 @@ def run(s3=None, agora=None):
             'dash-operacional.json': construir_dash_operacional(empresa, listas, agora, cfg),
             'dash-investigacao.json': construir_dash_investigacao(s3, empresa, listas, agora, cfg),
             'dash-metricas.json': construir_dash_metricas(s3, empresa, listas, agora, cfg),
+            'dash-qa.json': construir_dash_qa(empresa, listas, agora, cfg),
         }
         for nome, documento in documentos.items():
             gravar_json(
                 s3,
-                cfg['bucket'],
+                cfg['gold_bucket'],
                 f"{cfg['gold']}empresa-{empresa}/{nome}",
                 documento,
             )

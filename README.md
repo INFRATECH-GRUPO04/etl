@@ -11,7 +11,7 @@ preenchido, a role é assumida — não precisa de `if` no código. `AWS_REGION`
 
 O Bronze é lido de `01-bronze/`, a Silver é gravada em `02-silver/metricas/` (`_dados.csv`) e `02-silver/processos/` (`_processos.csv`), e a Gold em `03-gold/empresa-{id}/dash-*.json`. Não existe `latest.json` em nenhum prefixo.
 
-O primeiro script trata arquivos `_dados.csv` e `_processos.csv`, separados por empresa, servidor e data. O segundo lê apenas as partições `data=AAAA-MM-DD` dos últimos **40 dias** — o filtro é aplicado pela chave, antes de baixar o objeto — e grava, por empresa, seis arquivos principais: `dash-geral.json` (gestor), `dash-noc.json`, `dash-capacidade.json`, `dash-investigacao.json`, `dash-metricas.json` e `dash-operacional.json`, além das partições históricas em `dash-investigacao-historico/` e `dash-metricas/`. O `dash-geral.json` mantém o contrato `versao: 2` consumido pelo backend do site:
+O primeiro script trata arquivos `_dados.csv` e `_processos.csv`, separados por empresa, servidor e data. O segundo lê apenas as partições `data=AAAA-MM-DD` dos últimos **40 dias** — o filtro é aplicado pela chave, antes de baixar o objeto — e grava, por empresa, sete arquivos principais: `dash-geral.json` (gestor), `dash-noc.json`, `dash-capacidade.json`, `dash-investigacao.json`, `dash-metricas.json`, `dash-operacional.json` e `dash-qa.json`. As partições ficam em `dash-investigacao-historico/` e em `03-gold/metricas/empresa_id={id}/servidor_id={id}/data={dia}/dash-metricas.json`. Cada `dash-*.json` mantém exatamente a estrutura da branch de origem consumida pelo frontend; por isso o front só troca o nome do arquivo lido. O `dash-geral.json` mantém o contrato `versao: 2` consumido pelo backend do site:
 
 ```json
 {
@@ -62,7 +62,9 @@ A disponibilidade usa **dias de calendário** no fuso de `TIMEZONE`: 7 pontos em
 
 Só aparecem servidores que tenham ao menos uma coleta dentro da janela de 40 dias. Sem histórico, a disponibilidade é `null` (não zero); com histórico, mas sem amostras na janela, é `0`. Um servidor ativo no MySQL sem entrada no gold é contado como `offline` pelo backend.
 
-Para testar a escrita do gold em um bucket pessoal, defina `S3_GOLD_BUCKET` no `.env`; quando não definido, usa-se `S3_BUCKET`. A frequência esperada de coleta (padrão: 60 segundos) pode ser ajustada com `FREQUENCIA_ESPERADA_SEGUNDOS`, e o fuso com `TIMEZONE` (padrão: `America/Sao_Paulo`).
+Para testar a escrita do gold em um bucket pessoal, defina `S3_GOLD_BUCKET` no `.env`; quando não definido, usa-se `S3_BUCKET`. Ele vale para **todas** as gravações do gold, inclusive partições e manifestos. A frequência esperada de coleta (padrão: 60 segundos) pode ser ajustada com `FREQUENCIA_ESPERADA_SEGUNDOS`, e o fuso com `TIMEZONE` (padrão: `America/Sao_Paulo`).
+
+`dash-investigacao.json` replica o contrato da branch da Claudia: campos operacionais no nível superior e `historico` com `metadados`, `colunas_captura` e `particoes_historicas` (capturas compactadas na ordem das colunas). As partições separadas continuam sendo gravadas em `dash-investigacao-historico/`; quando o manifesto já corresponde ao conteúdo, a gravação é ignorada, mas o histórico embutido é sempre gerado. `dash-metricas.json` é o índice; o JSON diário de cada servidor segue a estrutura do `perfeito-sarah.json` da branch da Sarah e usa `REDE_SARAH_MAX_INTERVAL_SECONDS` (padrão: 180) e `LARGURA_BANDA_MBPS` (padrão: 1000). `dash-qa.json` traz o contrato da branch do Felipe por empresa (`empresas[]` com um único elemento), usando `REDE_QA_MAX_INTERVAL_SECONDS` (padrão: 120), `LIMITE_CRITICO_CPU_PCT` (padrão: 90) e `CAPACIDADE_REDE_MBPS` (padrão: 100). Colunas numéricas ausentes ou vazias viram `null` no QA; nenhuma captura é descartada por causa delas.
 
 Execute `silver2gold.py` periodicamente para atualizar a `conexao` de servidores que parem de enviar dados.
 
@@ -95,7 +97,7 @@ Variáveis na configuração da função:
 
 - `S3_BUCKET` — obrigatória nas duas; sem ela, `run()` falha com erro explícito.
 - `S3_BRONZE_PREFIX`, `S3_SILVER_PREFIX`, `S3_GOLD_PREFIX` — opcionais (padrões `01-bronze/`, `02-silver/`, `03-gold/`).
-- `TIMEZONE`, `OFFLINE_TIMEOUT_SECONDS`, `FREQUENCIA_ESPERADA_SEGUNDOS`, `LIMITE_*_PCT`, `REDE_MAX_INTERVAL_SECONDS`, `LARGURA_BANDA_MBPS`, `PLANEJAMENTO_JANELA_DIAS`, `GOLD_RETENTION_DAYS`, `S3_GOLD_BUCKET` — opcionais, usadas pelo silver2gold.
+- `TIMEZONE`, `OFFLINE_TIMEOUT_SECONDS`, `FREQUENCIA_ESPERADA_SEGUNDOS`, `LIMITE_*_PCT`, `REDE_MAX_INTERVAL_SECONDS`, `REDE_SARAH_MAX_INTERVAL_SECONDS`, `REDE_QA_MAX_INTERVAL_SECONDS`, `LARGURA_BANDA_MBPS`, `CAPACIDADE_REDE_MBPS`, `LIMITE_CRITICO_CPU_PCT`, `PLANEJAMENTO_JANELA_DIAS`, `GOLD_RETENTION_DAYS`, `S3_GOLD_BUCKET` — opcionais, usadas pelo silver2gold.
 - `AWS_REGION` é injetado automaticamente pela Lambda; `AWS_DEFAULT_REGION` é aceito como fallback. Não preencha credenciais AWS quando a função já tem IAM Role.
 
 Política IAM mínima da role:
@@ -131,8 +133,10 @@ Política IAM mínima da role:
 ```
 
 `ListBucket` é necessário não só para a paginação, mas para o `ler_manifesto()` do silver2gold
-conseguir distinguir `404` (chave ausente, normal) de `403` (permissão faltando). Não é preciso
-`s3:DeleteObject`: a retenção de 180 dias apenas filtra a entrada, nunca apaga objetos do gold.
+conseguir distinguir `404` (chave ausente, normal) de `403` (permissão faltando). Se `S3_GOLD_BUCKET`
+for diferente de `S3_BUCKET`, a role também precisa de `s3:GetObject` e `s3:PutObject` nos prefixos
+`03-gold/*` do bucket de gold (inclusive manifestos de partição). Não é preciso `s3:DeleteObject`:
+a retenção de 180 dias apenas filtra a entrada, nunca apaga objetos do gold.
 
 O bronze não usa watermark e reprocessa todo o prefixo `01-bronze/` a cada invocação, sobrescrevendo
 as chaves da silver; isso está de acordo com o contrato atual. O dia gravado na partição `data=` vem
